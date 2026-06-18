@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Check, FileText, Keyboard, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, Check, FileText, Keyboard, Loader2, Trash2, Upload } from "lucide-react";
 import { BotDocument } from "@/lib/types";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -404,6 +404,21 @@ export default function FileUploadZone({
               </div>
               {doc.status === "processing" ? (
                 <Loader2 size={16} className="text-gray-400 animate-spin shrink-0" />
+              ) : doc.status === "failed" ? (
+                <div className="flex items-center gap-2 shrink-0">
+                  <AlertCircle size={16} className="text-red-500" />
+                  <span className="text-[12px] text-red-500">Failed</span>
+                  {onDeleteDoc && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteDoc(doc.id)}
+                      className="text-gray-300 hover:text-red-500 transition-colors duration-150"
+                      title="Delete document"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="flex items-center gap-2 shrink-0">
                   <Check size={16} className="text-green-500" />

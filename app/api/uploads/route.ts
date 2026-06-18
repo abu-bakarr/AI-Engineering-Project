@@ -308,6 +308,28 @@ export async function POST(req: NextRequest) {
             const finalDocuments = nextDocuments.slice(
               existingDocuments.length,
             );
+
+            const readyDocuments = finalDocuments.filter(
+              (document) => document.status === "ready",
+            );
+            if (readyDocuments.length === 0) {
+              const failedNames = finalDocuments
+                .filter((document) => document.status === "failed")
+                .map((document) => document.name)
+                .join(", ");
+
+              controller.enqueue(
+                encodeStreamEvent({
+                  type: "error",
+                  error: failedNames
+                    ? `Cloud indexing failed for: ${failedNames}`
+                    : "Cloud indexing failed. No document was indexed.",
+                }),
+              );
+              controller.close();
+              return;
+            }
+
             controller.enqueue(
               encodeStreamEvent({
                 type: "complete",
@@ -345,6 +367,16 @@ export async function POST(req: NextRequest) {
         rag,
       });
       documents.push(document);
+    }
+
+    if (
+      uploadJobs.length > 0 &&
+      documents.every((document) => document.status !== "ready")
+    ) {
+      return NextResponse.json(
+        { error: "Cloud indexing failed. No document was indexed." },
+        { status: 500 },
+      );
     }
 
     if (documents.length > 0) {
