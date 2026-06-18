@@ -35,7 +35,7 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 RUN mkdir -p data rag/uploads && chown -R nextjs:nextjs data rag
 
 USER nextjs
-EXPOSE 3000
-ENV PORT=3000
+EXPOSE 3001
+ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
 CMD ["npm", "start"]
