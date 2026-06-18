@@ -19,7 +19,7 @@ const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
 const CHROMA_URL = process.env.CHROMA_URL?.trim() || "https://api.trychroma.com";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
 let cloudClient: CloudClient | null = null;
-let cloudCollection: Collection | null = null;
+const cloudCollections = new Map<string, Collection>();
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -695,14 +695,22 @@ function getCloudClient(): CloudClient {
   return cloudClient;
 }
 
-async function getCloudCollection(): Promise<Collection> {
-  if (cloudCollection) return cloudCollection;
+function cloudCollectionName(botId: string): string {
+  const safeBotId = botId.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return `${CHROMA_COLLECTION}__${safeBotId}`.slice(0, 63);
+}
+
+async function getCloudCollection(botId: string): Promise<Collection> {
+  const name = cloudCollectionName(botId);
+  const cached = cloudCollections.get(name);
+  if (cached) return cached;
 
   const client = getCloudClient();
-  cloudCollection = await client.getOrCreateCollection({
-    name: CHROMA_COLLECTION,
+  const collection = await client.getOrCreateCollection({
+    name,
   });
-  return cloudCollection;
+  cloudCollections.set(name, collection);
+  return collection;
 }
 
 function toMetadataValue(value: unknown): Metadata[string] {
@@ -876,7 +884,7 @@ export async function indexDocumentChunks(params: {
     toChromaMetadata(chunk.metadata as Record<string, unknown>),
   );
   const embeddings = await embeddingsModel().embedDocuments(documents);
-  const collection = await getCloudCollection();
+  const collection = await getCloudCollection(botId);
 
   await collection.upsert({
     ids,
@@ -897,7 +905,7 @@ export async function removeDocumentChunks(
   botId: string,
   docId: string,
 ): Promise<void> {
-  const collection = await getCloudCollection();
+  const collection = await getCloudCollection(botId);
   await collection.delete({ where: { botId, docId } });
 }
 
@@ -923,7 +931,7 @@ export async function removeBotKnowledgeByDocuments(
 
   const vectorCleanup = Promise.resolve()
     .then(async () => {
-      const collection = await getCloudCollection();
+      const collection = await getCloudCollection(botId);
       await collection.delete({ where: { botId } });
     })
     .catch((error) => {
@@ -937,7 +945,7 @@ export async function removeBotKnowledgeByDocuments(
 
 export async function retrieveContext(botId: string, query: string) {
   try {
-    const collection = await getCloudCollection();
+    const collection = await getCloudCollection(botId);
     const queryEmbedding = await embeddingsModel().embedQuery(query);
     const result = await collection.query({
       queryEmbeddings: [queryEmbedding],

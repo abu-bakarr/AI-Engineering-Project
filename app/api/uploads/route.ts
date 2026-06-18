@@ -250,6 +250,7 @@ export async function POST(req: NextRequest) {
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           const nextDocuments = [...persistedDocuments];
+          const failureReasons: Record<string, string> = {};
           try {
             controller.enqueue(
               encodeStreamEvent({
@@ -281,6 +282,7 @@ export async function POST(req: NextRequest) {
                 console.warn(
                   `Document processing failed for ${job.file.name}: ${details}`,
                 );
+                failureReasons[job.file.name] = details;
                 completedDoc = {
                   ...placeholder,
                   status: "failed",
@@ -317,13 +319,18 @@ export async function POST(req: NextRequest) {
                 .filter((document) => document.status === "failed")
                 .map((document) => document.name)
                 .join(", ");
+              const failedDetails = Object.entries(failureReasons)
+                .map(([name, reason]) => `${name}: ${reason}`)
+                .join(" | ");
 
               controller.enqueue(
                 encodeStreamEvent({
                   type: "error",
-                  error: failedNames
-                    ? `Cloud indexing failed for: ${failedNames}`
-                    : "Cloud indexing failed. No document was indexed.",
+                  error: failedDetails
+                    ? `Cloud indexing failed for: ${failedDetails}`
+                    : failedNames
+                      ? `Cloud indexing failed for: ${failedNames}`
+                      : "Cloud indexing failed. No document was indexed.",
                 }),
               );
               controller.close();
