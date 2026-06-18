@@ -8,7 +8,7 @@
     "chroma": "chroma run --path ./rag/dataStore --host localhost --port 8000",
     "db:reset:supabase": "node ./scripts/reset-supabase.mjs",
     "build": "next build --webpack",
-    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}"
+    "start": "node ./scripts/start.mjs"
   },
   "dependencies": {
     "@chroma-core/default-embed": "^0.1.9",
