@@ -1,4 +1,4 @@
-# DSTI RAG Chatbot Platform
+# AI Chatbot Platform
 
 A platform for creating document-backed chatbots that can be embedded on any website. Upload documents, configure your bot, and let it answer questions strictly from the content you provide.
 
@@ -57,7 +57,7 @@ This is the recommended way to run the application for both development and prod
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd dsti_rag_chatbot_platform
+    cd AI-Engineering-Project
     ```
 
 2.  **Set up environment variables:**
@@ -198,7 +198,7 @@ OPENROUTER_REFERER=http://localhost:3001
 
 # ChromaDB
 CHROMA_URL=http://localhost:8000
-CHROMA_COLLECTION=dsti_rag_docs
+CHROMA_COLLECTION=rag_docs
 
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co
@@ -331,7 +331,7 @@ The recommended production layout is:
 ## Project Structure
 
 ```
-dsti_rag_chatbot_platform/
+AI-Engineering-Project/
 ├── app/
 │   ├── api/
 │   │   ├── bots/            # Bot CRUD endpoints
@@ -392,4 +392,4 @@ The platform currently supports:
 
 ## Support
 
-For support and questions, please contact [dsti.gov.sl].
+For support and questions, please contact [+23288397913].

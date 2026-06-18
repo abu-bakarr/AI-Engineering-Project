@@ -238,7 +238,7 @@ export default function WidgetPage() {
 
       {/* Footer */}
       <div className="text-center text-[11px] text-slate-400 py-2 shrink-0">
-        Powered by DSTI
+        Powered by Lovel
       </div>
     </div>
   );

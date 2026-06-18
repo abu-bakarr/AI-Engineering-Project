@@ -479,7 +479,7 @@ async function extractPdfWithOpenRouter(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": process.env.OPENROUTER_REFERER ?? "http://localhost:3001",
-      "X-Title": process.env.OPENROUTER_APP_NAME ?? "DSTI RAG Chatbot Platform",
+      "X-Title": process.env.OPENROUTER_APP_NAME ?? "RAG Chatbot Platform",
     },
     body: JSON.stringify({
       model: OPENROUTER_DOCUMENT_MODEL,
@@ -642,7 +642,7 @@ function embeddingsModel(): OpenAIEmbeddings {
         "HTTP-Referer":
           process.env.OPENROUTER_REFERER ?? "http://localhost:3000",
         "X-Title":
-          process.env.OPENROUTER_APP_NAME ?? "DSTI RAG Chatbot Platform",
+          process.env.OPENROUTER_APP_NAME ?? "RAG Chatbot Platform",
       },
     },
   });
@@ -689,13 +689,21 @@ function scoreChunk(content: string, terms: string[]): number {
 async function fallbackRetrieveContext(botId: string, query: string) {
   const bot = await getBotById(botId);
   if (!bot?.documents?.length) {
-    return { context: "", sources: [] as string[], citations: [] as ChatCitation[] };
+    return {
+      context: "",
+      sources: [] as string[],
+      citations: [] as ChatCitation[],
+    };
   }
 
   const queryTerms = normalizeQueryTerms(query);
   const docsWithContent = bot.documents.filter((doc) => doc.content?.trim());
   if (docsWithContent.length === 0) {
-    return { context: "", sources: [] as string[], citations: [] as ChatCitation[] };
+    return {
+      context: "",
+      sources: [] as string[],
+      citations: [] as ChatCitation[],
+    };
   }
 
   const candidates = (
@@ -920,7 +928,7 @@ async function requestOpenRouterAnswer(prompt: string): Promise<string> {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       "HTTP-Referer": process.env.OPENROUTER_REFERER ?? "http://localhost:3001",
-      "X-Title": process.env.OPENROUTER_APP_NAME ?? "DSTI RAG Chatbot Platform",
+      "X-Title": process.env.OPENROUTER_APP_NAME ?? "RAG Chatbot Platform",
     },
     body: JSON.stringify({
       model: process.env.OPENROUTER_MODEL ?? "openrouter/auto",

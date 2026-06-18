@@ -70,7 +70,7 @@ export default function Sidebar() {
           <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
             <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-white">
               <Database size={15} className="text-blue-300" />
-             DSTI RAG Chatbot Platform
+              RAG Chatbot Platform
             </div>
             <p className="text-[12px] leading-5 text-slate-400">
               Bots and documents sync through database-backed API routes.
