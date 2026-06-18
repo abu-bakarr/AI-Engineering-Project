@@ -8,13 +8,20 @@ import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { Chroma } from "@langchain/community/vectorstores/chroma";
+import { CloudClient } from "chromadb";
 import { getBotById, removeDocumentObjects } from "@/lib/supabase-store";
 import { BotDocument, ChatCitation } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const CHROMA_URL = process.env.CHROMA_URL ?? "http://localhost:8000";
+const CHROMA_API_KEY = process.env.CHROMA_API_KEY?.trim();
+const CHROMA_TENANT = process.env.CHROMA_TENANT?.trim();
+const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
+const CHROMA_URL =
+  process.env.CHROMA_URL?.trim() ||
+  (CHROMA_API_KEY ? "https://api.trychroma.com" : "http://localhost:8000");
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
+let cloudClient: CloudClient | null = null;
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -648,10 +655,46 @@ function embeddingsModel(): OpenAIEmbeddings {
   });
 }
 
+function parseChromaCloudHostAndPort(urlValue: string): {
+  host?: string;
+  port?: number;
+} {
+  try {
+    const parsed = new URL(urlValue);
+    const host = parsed.hostname || undefined;
+    const port = parsed.port ? Number(parsed.port) : undefined;
+    if (port !== undefined && Number.isNaN(port)) {
+      return { host };
+    }
+    return { host, port };
+  } catch {
+    return {};
+  }
+}
+
+function getCloudClient(): CloudClient | null {
+  if (!CHROMA_API_KEY) return null;
+  if (cloudClient) return cloudClient;
+
+  const { host, port } = parseChromaCloudHostAndPort(CHROMA_URL);
+
+  cloudClient = new CloudClient({
+    apiKey: CHROMA_API_KEY,
+    ...(host ? { host } : {}),
+    ...(port ? { port } : {}),
+    ...(CHROMA_TENANT ? { tenant: CHROMA_TENANT } : {}),
+    ...(CHROMA_DATABASE ? { database: CHROMA_DATABASE } : {}),
+  });
+
+  return cloudClient;
+}
+
 async function vectorStore(): Promise<Chroma> {
+  const client = getCloudClient();
+
   return new Chroma(embeddingsModel(), {
     collectionName: CHROMA_COLLECTION,
-    url: CHROMA_URL,
+    ...(client ? { index: client } : { url: CHROMA_URL }),
   });
 }
 
