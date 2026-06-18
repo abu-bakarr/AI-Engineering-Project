@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBotById, incrementBotQueries } from "@/lib/supabase-store";
-import { answerFromContext, retrieveContext } from "@/lib/rag";
 import { ChatResponse } from "@/lib/types";
 
 function corsHeaders(origin: string | null): HeadersInit {
@@ -21,41 +20,56 @@ export async function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const startedAt = performance.now();
   const origin = req.headers.get("origin");
-  const { botId, message } = (await req.json()) as { botId?: string; message?: string };
+  const { botId, message } = (await req.json()) as {
+    botId?: string;
+    message?: string;
+  };
 
   if (!botId || !message?.trim()) {
     return NextResponse.json(
       { error: "botId and message are required" },
-      { status: 400, headers: corsHeaders(origin) }
+      { status: 400, headers: corsHeaders(origin) },
     );
   }
 
   const bot = await getBotById(botId);
   if (!bot) {
-    return NextResponse.json({ error: "Bot not found" }, { status: 404, headers: corsHeaders(origin) });
+    return NextResponse.json(
+      { error: "Bot not found" },
+      { status: 404, headers: corsHeaders(origin) },
+    );
   }
 
   if (bot.documents.length === 0) {
     return NextResponse.json(
       { error: "This bot has no uploaded documents. Upload documents first." },
-      { status: 400, headers: corsHeaders(origin) }
+      { status: 400, headers: corsHeaders(origin) },
     );
   }
 
   try {
-    const { context, sources, citations } = await retrieveContext(botId, message);
+    const { answerFromContext, retrieveContext } = await import("@/lib/rag");
+    const { context, sources, citations } = await retrieveContext(
+      botId,
+      message,
+    );
     if (!context.trim()) {
       return NextResponse.json(
         {
-          reply: "I can only answer questions that are supported by the uploaded policy corpus.",
+          reply:
+            "I can only answer questions that are supported by the uploaded policy corpus.",
           citations: [],
           latencyMs: Math.round(performance.now() - startedAt),
         } satisfies ChatResponse,
-        { headers: corsHeaders(origin) }
+        { headers: corsHeaders(origin) },
       );
     }
 
-    const reply = await answerFromContext({ question: message, context, sources });
+    const reply = await answerFromContext({
+      question: message,
+      context,
+      sources,
+    });
 
     await incrementBotQueries(botId);
 
@@ -71,7 +85,7 @@ export async function POST(req: NextRequest) {
     const details = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
       { error: "RAG processing failed", details },
-      { status: 500, headers: corsHeaders(origin) }
+      { status: 500, headers: corsHeaders(origin) },
     );
   }
 }

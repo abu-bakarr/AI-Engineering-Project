@@ -7,8 +7,7 @@ import { promisify } from "node:util";
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
-import { Chroma } from "@langchain/community/vectorstores/chroma";
-import { CloudClient } from "chromadb";
+import { CloudClient, type Collection, type Metadata } from "chromadb";
 import { getBotById, removeDocumentObjects } from "@/lib/supabase-store";
 import { BotDocument, ChatCitation } from "@/lib/types";
 
@@ -20,6 +19,7 @@ const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
 const CHROMA_URL = process.env.CHROMA_URL?.trim() || "https://api.trychroma.com";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
 let cloudClient: CloudClient | null = null;
+let cloudCollection: Collection | null = null;
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -695,13 +695,45 @@ function getCloudClient(): CloudClient {
   return cloudClient;
 }
 
-async function vectorStore(): Promise<Chroma> {
-  const client = getCloudClient();
+async function getCloudCollection(): Promise<Collection> {
+  if (cloudCollection) return cloudCollection;
 
-  return new Chroma(embeddingsModel(), {
-    collectionName: CHROMA_COLLECTION,
-    index: client,
+  const client = getCloudClient();
+  cloudCollection = await client.getOrCreateCollection({
+    name: CHROMA_COLLECTION,
   });
+  return cloudCollection;
+}
+
+function toMetadataValue(value: unknown): Metadata[string] {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.every((item): item is string => typeof item === "string")) {
+      return value;
+    }
+    if (value.every((item): item is number => typeof item === "number")) {
+      return value;
+    }
+    if (value.every((item): item is boolean => typeof item === "boolean")) {
+      return value;
+    }
+  }
+
+  return JSON.stringify(value);
+}
+
+function toChromaMetadata(input: Record<string, unknown>): Metadata {
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [key, toMetadataValue(value)]),
+  ) as Metadata;
 }
 
 export async function chunkText(
@@ -839,16 +871,34 @@ export async function indexDocumentChunks(params: {
   if (chunks.length === 0) return;
 
   const ids = chunks.map((_, i) => `${botId}:${docId}:${i}`);
-  const store = await vectorStore();
-  await store.addDocuments(chunks, { ids });
+  const documents = chunks.map((chunk) => chunk.pageContent);
+  const metadatas = chunks.map((chunk) =>
+    toChromaMetadata(chunk.metadata as Record<string, unknown>),
+  );
+  const embeddings = await embeddingsModel().embedDocuments(documents);
+  const collection = await getCloudCollection();
+
+  await collection.upsert({
+    ids,
+    documents,
+    metadatas,
+    embeddings,
+  });
+
+  const verify = await collection.get({ ids, include: [] });
+  if ((verify.ids?.length ?? 0) !== ids.length) {
+    throw new Error(
+      `Chroma Cloud verification failed: expected ${ids.length} chunks, found ${verify.ids?.length ?? 0}.`,
+    );
+  }
 }
 
 export async function removeDocumentChunks(
   botId: string,
   docId: string,
 ): Promise<void> {
-  const store = await vectorStore();
-  await store.delete({ filter: { botId, docId } });
+  const collection = await getCloudCollection();
+  await collection.delete({ where: { botId, docId } });
 }
 
 export async function removeBotKnowledge(botId: string): Promise<void> {
@@ -871,8 +921,11 @@ export async function removeBotKnowledgeByDocuments(
     );
   });
 
-  const vectorCleanup = vectorStore()
-    .then((store) => store.delete({ filter: { botId } }))
+  const vectorCleanup = Promise.resolve()
+    .then(async () => {
+      const collection = await getCloudCollection();
+      await collection.delete({ where: { botId } });
+    })
     .catch((error) => {
       const details =
         error instanceof Error ? error.message : "Unknown vector cleanup error";
@@ -884,34 +937,49 @@ export async function removeBotKnowledgeByDocuments(
 
 export async function retrieveContext(botId: string, query: string) {
   try {
-    const store = await vectorStore();
-    let docs: Document[];
-    try {
-      docs = await store.similaritySearch(query, 8, { botId });
-    } catch {
-      docs = await store.similaritySearch(query, 12);
-    }
-    const botDocs = rerankRetrievedDocs(
-      docs.filter((d) => String(d.metadata?.botId ?? "") === botId),
-      query,
-    ).slice(0, 6);
-    const contextBlocks = botDocs
+    const collection = await getCloudCollection();
+    const queryEmbedding = await embeddingsModel().embedQuery(query);
+    const result = await collection.query({
+      queryEmbeddings: [queryEmbedding],
+      nResults: 12,
+      where: { botId },
+      include: ["documents", "metadatas"],
+    });
+
+    const documents = result.documents?.[0] ?? [];
+    const metadatas = result.metadatas?.[0] ?? [];
+
+    const pairs = documents
+      .map((pageContent, index) => {
+        if (!pageContent) return null;
+        const metadata = metadatas[index] ?? {};
+        return {
+          pageContent,
+          metadata,
+          score: scoreChunk(pageContent, normalizeQueryTerms(query)),
+        };
+      })
+      .filter((item): item is { pageContent: string; metadata: Metadata; score: number } => Boolean(item))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+
+    const contextBlocks = pairs
       .map(
-        (d) =>
-          `Source: ${String(d.metadata?.fileName ?? "unknown")}\n${d.pageContent.trim()}`,
+        (entry) =>
+          `Source: ${String(entry.metadata?.fileName ?? "unknown")}\n${entry.pageContent.trim()}`,
       )
       .filter(Boolean);
     const sources = Array.from(
       new Set(
-        botDocs
-          .map((d) => String(d.metadata?.fileName ?? "unknown"))
+        pairs
+          .map((entry) => String(entry.metadata?.fileName ?? "unknown"))
           .filter(Boolean),
       ),
     );
-    const citations: ChatCitation[] = botDocs.map((d) => ({
-      docId: String(d.metadata?.docId ?? "") || undefined,
-      fileName: String(d.metadata?.fileName ?? "unknown"),
-      snippet: d.pageContent.trim().slice(0, 280),
+    const citations: ChatCitation[] = pairs.map((entry) => ({
+      docId: String(entry.metadata?.docId ?? "") || undefined,
+      fileName: String(entry.metadata?.fileName ?? "unknown"),
+      snippet: entry.pageContent.trim().slice(0, 280),
     }));
 
     if (contextBlocks.length > 0) {

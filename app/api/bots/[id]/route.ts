@@ -8,7 +8,6 @@ import {
   replaceBotDocuments,
   updateBot,
 } from "@/lib/supabase-store";
-import { removeBotKnowledgeByDocuments, removeDocumentChunks } from "@/lib/rag";
 
 export async function GET(
   _: NextRequest,
@@ -31,6 +30,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (Array.isArray(updates.documents)) {
+    const { removeDocumentChunks } = await import("@/lib/rag");
     const currentDocuments = currentBot.documents as BotDocument[];
     const existingIds = new Set(currentDocuments.map((d) => d.id));
     const nextIds = new Set(
@@ -76,6 +76,7 @@ export async function DELETE(
     .filter((value): value is string => Boolean(value));
 
   try {
+    const { removeBotKnowledgeByDocuments } = await import("@/lib/rag");
     if (storagePaths.length > 0) {
       await removeDocumentObjects(storagePaths);
     }

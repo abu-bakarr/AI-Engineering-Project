@@ -7,13 +7,6 @@ import {
   replaceBotDocuments,
   uploadDocumentObject,
 } from "@/lib/supabase-store";
-import {
-  ALLOWED_EXTENSIONS,
-  extractDocumentText,
-  hashBuffer,
-  indexDocumentChunks,
-  sanitizeFileName,
-} from "@/lib/rag";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -22,6 +15,7 @@ import path from "node:path";
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+type RagModule = typeof import("@/lib/rag");
 
 function countWords(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
@@ -37,13 +31,17 @@ async function processUploadedDocument(params: {
   file: File;
   bytes: Buffer;
   hash: string;
+  rag: Pick<
+    RagModule,
+    "extractDocumentText" | "indexDocumentChunks" | "sanitizeFileName"
+  >;
 }): Promise<BotDocument> {
-  const { botId, docId, file, bytes, hash } = params;
+  const { botId, docId, file, bytes, hash, rag } = params;
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const storedName = documentStoragePath({
     botId,
     docId,
-    fileName: sanitizeFileName(file.name),
+    fileName: rag.sanitizeFileName(file.name),
   });
 
   let content = "";
@@ -66,11 +64,11 @@ async function processUploadedDocument(params: {
 
   if (status !== "failed") {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dsti-upload-"));
-    const tempPath = path.join(tempDir, sanitizeFileName(file.name));
+    const tempPath = path.join(tempDir, rag.sanitizeFileName(file.name));
 
     try {
       fs.writeFileSync(tempPath, bytes);
-      content = await extractDocumentText({
+      content = await rag.extractDocumentText({
         buffer: bytes,
         filePath: tempPath,
         fileName: file.name,
@@ -104,16 +102,18 @@ async function processUploadedDocument(params: {
 
   if (document.status === "ready" && content.trim()) {
     try {
-      await indexDocumentChunks({
+      await rag.indexDocumentChunks({
         botId,
         docId: document.id,
         fileName: document.name,
         text: content,
       });
     } catch (error) {
+      status = "failed";
       const details =
         error instanceof Error ? error.message : "Unknown indexing error";
-      console.warn(`Best-effort indexing failed for ${document.name}: ${details}`);
+      console.warn(`Cloud indexing failed for ${document.name}: ${details}`);
+      throw new Error(`Cloud indexing failed for ${document.name}: ${details}`);
     }
   }
 
@@ -122,6 +122,9 @@ async function processUploadedDocument(params: {
 
 export async function POST(req: NextRequest) {
   try {
+    const rag = await import("@/lib/rag");
+    const { ALLOWED_EXTENSIONS, hashBuffer, indexDocumentChunks } = rag;
+
     const form = await req.formData();
     const botId = String(form.get("botId") ?? "").trim();
     const richText = String(form.get("richText") ?? "").trim();
@@ -129,15 +132,23 @@ export async function POST(req: NextRequest) {
       .getAll("files")
       .filter((f): f is File => f instanceof File);
     if (incoming.length === 0 && !richText) {
-      return NextResponse.json({ error: "Upload a supported file or add rich text." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Upload a supported file or add rich text." },
+        { status: 400 },
+      );
     }
     if (!botId) {
       return NextResponse.json({ error: "botId is required" }, { status: 400 });
     }
     if (richText && countWords(richText) > 500) {
-      return NextResponse.json({ error: "Rich text content cannot exceed 500 words." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Rich text content cannot exceed 500 words." },
+        { status: 400 },
+      );
     }
-    const oversized = incoming.filter((file) => file.size > MAX_FILE_SIZE_BYTES);
+    const oversized = incoming.filter(
+      (file) => file.size > MAX_FILE_SIZE_BYTES,
+    );
     if (oversized.length > 0) {
       return NextResponse.json(
         {
@@ -154,11 +165,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Bot not found" }, { status: 404 });
     }
 
-    const knownHashes = new Set(bot.documents.map((d) => d.hash).filter(Boolean));
+    const knownHashes = new Set(
+      bot.documents.map((d) => d.hash).filter(Boolean),
+    );
     const seenInRequest = new Set<string>();
     const documents: BotDocument[] = [];
     const skipped: string[] = [];
-    const wantsProgressStream = req.headers.get("x-upload-progress") === "stream";
+    const wantsProgressStream =
+      req.headers.get("x-upload-progress") === "stream";
 
     if (richText) {
       const hash = hashBuffer(Buffer.from(richText, "utf8"));
@@ -189,7 +203,7 @@ export async function POST(req: NextRequest) {
         } catch (error) {
           const details =
             error instanceof Error ? error.message : "Unknown indexing error";
-          console.warn(`Best-effort indexing failed for rich text: ${details}`);
+          throw new Error(`Cloud indexing failed for rich text: ${details}`);
         }
       }
     }
@@ -216,16 +230,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (wantsProgressStream && uploadJobs.length > 0) {
-      const processingDocs: BotDocument[] = uploadJobs.map(({ file, hash }) => ({
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        type: file.name.split(".").pop()?.toLowerCase() ?? "",
-        uploadedAt: new Date().toISOString(),
-        status: "processing",
-        hash,
-        source: "upload",
-      }));
+      const processingDocs: BotDocument[] = uploadJobs.map(
+        ({ file, hash }) => ({
+          id: crypto.randomUUID(),
+          name: file.name,
+          size: file.size,
+          type: file.name.split(".").pop()?.toLowerCase() ?? "",
+          uploadedAt: new Date().toISOString(),
+          status: "processing",
+          hash,
+          source: "upload",
+        }),
+      );
 
       const existingDocuments = [...bot.documents, ...documents];
       const persistedDocuments = [...existingDocuments, ...processingDocs];
@@ -255,11 +271,16 @@ export async function POST(req: NextRequest) {
                   file: job.file,
                   bytes: job.bytes,
                   hash: job.hash,
+                  rag,
                 });
               } catch (error) {
                 const details =
-                  error instanceof Error ? error.message : "Unknown processing error";
-                console.warn(`Document processing failed for ${job.file.name}: ${details}`);
+                  error instanceof Error
+                    ? error.message
+                    : "Unknown processing error";
+                console.warn(
+                  `Document processing failed for ${job.file.name}: ${details}`,
+                );
                 completedDoc = {
                   ...placeholder,
                   status: "failed",
@@ -284,7 +305,9 @@ export async function POST(req: NextRequest) {
               );
             }
 
-            const finalDocuments = nextDocuments.slice(existingDocuments.length);
+            const finalDocuments = nextDocuments.slice(
+              existingDocuments.length,
+            );
             controller.enqueue(
               encodeStreamEvent({
                 type: "complete",
@@ -319,6 +342,7 @@ export async function POST(req: NextRequest) {
         file: job.file,
         bytes: job.bytes,
         hash: job.hash,
+        rag,
       });
       documents.push(document);
     }
@@ -329,7 +353,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ documents, skipped });
   } catch (error) {
-    const details = error instanceof Error ? error.message : "Unknown upload error";
+    const details =
+      error instanceof Error ? error.message : "Unknown upload error";
     console.error(`Upload failed: ${details}`);
     return NextResponse.json({ error: details }, { status: 500 });
   }

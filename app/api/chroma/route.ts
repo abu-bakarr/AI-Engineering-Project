@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CloudClient, Collection, Metadata } from "chromadb";
+import type { Collection, Metadata } from "chromadb";
 
 interface AddDataRequest {
   ids: string[];
@@ -7,7 +7,7 @@ interface AddDataRequest {
   metadatas: Metadata[];
 }
 
-function createCloudClient(): CloudClient {
+async function createCloudClient() {
   const chromaApiKey = process.env.CHROMA_API_KEY?.trim();
   const chromaTenant = process.env.CHROMA_TENANT?.trim();
   const chromaDatabase = process.env.CHROMA_DATABASE?.trim();
@@ -17,6 +17,8 @@ function createCloudClient(): CloudClient {
       "CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE are required for Chroma Cloud.",
     );
   }
+
+  const { CloudClient } = await import("chromadb");
 
   return new CloudClient({
     apiKey: chromaApiKey,
@@ -31,7 +33,7 @@ let myCollection: Collection | null = null;
 
 const getMyCollection = async () => {
   if (!myCollection) {
-    const chromaClient = createCloudClient();
+    const chromaClient = await createCloudClient();
     myCollection = await chromaClient.getOrCreateCollection({
       name: collectionName,
     });
