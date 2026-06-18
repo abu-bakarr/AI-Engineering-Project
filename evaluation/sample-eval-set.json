@@ -1,0 +1,32 @@
+[
+  {
+    "question": "How many remote work days per week are employees allowed without extra approval?",
+    "requiredCitations": ["remote-work-policy.md"],
+    "requiredAnswerFragments": ["two days"],
+    "forbiddenFragments": ["three days", "five days"]
+  },
+  {
+    "question": "By when must a phishing email be reported?",
+    "requiredCitations": ["security-and-access-policy.md"],
+    "requiredAnswerFragments": ["30 minutes"],
+    "forbiddenFragments": ["24 hours"]
+  },
+  {
+    "question": "What is the meal cap for domestic travel?",
+    "requiredCitations": ["travel-and-expense-policy.md"],
+    "requiredAnswerFragments": ["45", "$45"],
+    "forbiddenFragments": ["60", "$60"]
+  },
+  {
+    "question": "When should PTO requests of five or more days be submitted?",
+    "requiredCitations": ["paid-time-off-policy.md"],
+    "requiredAnswerFragments": ["15 business days"],
+    "forbiddenFragments": ["two days"]
+  },
+  {
+    "question": "Who must approve software with customer data processing?",
+    "requiredCitations": ["security-and-access-policy.md"],
+    "requiredAnswerFragments": ["Security", "Legal"],
+    "forbiddenFragments": ["team lead only"]
+  }
+]
