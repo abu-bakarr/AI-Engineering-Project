@@ -19,23 +19,22 @@ COPY . .
 RUN npm run build
 
 # Runner stage: Production image with minimal footprint
-FROM base AS runner
+FROM node:20-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
 RUN addgroup --system --gid 1001 nextjs
 RUN adduser --system --uid 1001 nextjs
 
+# Copy standalone output
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nextjs /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/next.config.mjs ./next.config.mjs
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
 
 RUN mkdir -p data rag/uploads && chown -R nextjs:nextjs data rag
 
 USER nextjs
 EXPOSE 3000
 ENV HOSTNAME="0.0.0.0"
-CMD ["npm", "start"]
+ENV PORT="3000"
+CMD ["node", "server.js"]
