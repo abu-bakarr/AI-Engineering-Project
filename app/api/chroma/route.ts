@@ -7,13 +7,23 @@ interface AddDataRequest {
   metadatas: Metadata[];
 }
 
-const chromaClient = new CloudClient({
-  apiKey: process.env.CHROMA_API_KEY,
-  ...(process.env.CHROMA_TENANT ? { tenant: process.env.CHROMA_TENANT } : {}),
-  ...(process.env.CHROMA_DATABASE
-    ? { database: process.env.CHROMA_DATABASE }
-    : {}),
-});
+function createCloudClient(): CloudClient {
+  const chromaApiKey = process.env.CHROMA_API_KEY?.trim();
+  const chromaTenant = process.env.CHROMA_TENANT?.trim();
+  const chromaDatabase = process.env.CHROMA_DATABASE?.trim();
+
+  if (!chromaApiKey || !chromaTenant || !chromaDatabase) {
+    throw new Error(
+      "CHROMA_API_KEY, CHROMA_TENANT, and CHROMA_DATABASE are required for Chroma Cloud.",
+    );
+  }
+
+  return new CloudClient({
+    apiKey: chromaApiKey,
+    tenant: chromaTenant,
+    database: chromaDatabase,
+  });
+}
 
 const collectionName = process.env.CHROMA_COLLECTION || "myCollection";
 
@@ -21,6 +31,7 @@ let myCollection: Collection | null = null;
 
 const getMyCollection = async () => {
   if (!myCollection) {
+    const chromaClient = createCloudClient();
     myCollection = await chromaClient.getOrCreateCollection({
       name: collectionName,
     });

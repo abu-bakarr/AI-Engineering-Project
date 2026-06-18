@@ -17,9 +17,7 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY?.trim();
 const CHROMA_TENANT = process.env.CHROMA_TENANT?.trim();
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
-const CHROMA_URL =
-  process.env.CHROMA_URL?.trim() ||
-  (CHROMA_API_KEY ? "https://api.trychroma.com" : "http://localhost:8000");
+const CHROMA_URL = process.env.CHROMA_URL?.trim() || "https://api.trychroma.com";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
 let cloudClient: CloudClient | null = null;
 const OPENROUTER_DOCUMENT_MODEL =
@@ -672,8 +670,16 @@ function parseChromaCloudHostAndPort(urlValue: string): {
   }
 }
 
-function getCloudClient(): CloudClient | null {
-  if (!CHROMA_API_KEY) return null;
+function getCloudClient(): CloudClient {
+  if (!CHROMA_API_KEY) {
+    throw new Error("CHROMA_API_KEY is required for Chroma Cloud.");
+  }
+  if (!CHROMA_TENANT) {
+    throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
+  }
+  if (!CHROMA_DATABASE) {
+    throw new Error("CHROMA_DATABASE is required for Chroma Cloud.");
+  }
   if (cloudClient) return cloudClient;
 
   const { host, port } = parseChromaCloudHostAndPort(CHROMA_URL);
@@ -682,8 +688,8 @@ function getCloudClient(): CloudClient | null {
     apiKey: CHROMA_API_KEY,
     ...(host ? { host } : {}),
     ...(port ? { port } : {}),
-    ...(CHROMA_TENANT ? { tenant: CHROMA_TENANT } : {}),
-    ...(CHROMA_DATABASE ? { database: CHROMA_DATABASE } : {}),
+    tenant: CHROMA_TENANT,
+    database: CHROMA_DATABASE,
   });
 
   return cloudClient;
@@ -694,7 +700,7 @@ async function vectorStore(): Promise<Chroma> {
 
   return new Chroma(embeddingsModel(), {
     collectionName: CHROMA_COLLECTION,
-    ...(client ? { index: client } : { url: CHROMA_URL }),
+    index: client,
   });
 }
 
