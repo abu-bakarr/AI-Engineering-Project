@@ -865,6 +865,26 @@ function rerankRetrievedDocs(docs: Document[], query: string): Document[] {
     .map((entry) => entry.doc);
 }
 
+async function generateEmbeddings(documents: string[]): Promise<number[][] | null> {
+  try {
+    const embeddings = await embeddingsModel().embedDocuments(documents);
+    if (
+      !embeddings ||
+      !Array.isArray(embeddings) ||
+      embeddings.length !== documents.length ||
+      embeddings.some((e) => !Array.isArray(e) || e.length === 0)
+    ) {
+      console.warn("Embeddings API returned invalid data, using Chroma built-in embeddings.");
+      return null;
+    }
+    return embeddings;
+  } catch (error) {
+    const details = error instanceof Error ? error.message : "Unknown embedding error";
+    console.warn(`Embeddings API failed: ${details}. Using Chroma built-in embeddings.`);
+    return null;
+  }
+}
+
 export async function indexDocumentChunks(params: {
   botId: string;
   docId: string;
@@ -883,15 +903,27 @@ export async function indexDocumentChunks(params: {
   const metadatas = chunks.map((chunk) =>
     toChromaMetadata(chunk.metadata as Record<string, unknown>),
   );
-  const embeddings = await embeddingsModel().embedDocuments(documents);
+
   const collection = await getCloudCollection(botId);
 
-  await collection.upsert({
-    ids,
-    documents,
-    metadatas,
-    embeddings,
-  });
+  // Try external embeddings first, fall back to Chroma's built-in embedding
+  const embeddings = await generateEmbeddings(documents);
+
+  if (embeddings) {
+    await collection.upsert({
+      ids,
+      documents,
+      metadatas,
+      embeddings,
+    });
+  } else {
+    // Let Chroma Cloud generate embeddings using its default embedding function
+    await collection.upsert({
+      ids,
+      documents,
+      metadatas,
+    });
+  }
 
   const verify = await collection.get({ ids, include: [] });
   if ((verify.ids?.length ?? 0) !== ids.length) {
@@ -943,16 +975,42 @@ export async function removeBotKnowledgeByDocuments(
   await Promise.all([fileCleanup, vectorCleanup]);
 }
 
+async function generateQueryEmbedding(query: string): Promise<number[] | null> {
+  try {
+    const embedding = await embeddingsModel().embedQuery(query);
+    if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+      return null;
+    }
+    return embedding;
+  } catch {
+    return null;
+  }
+}
+
 export async function retrieveContext(botId: string, query: string) {
   try {
     const collection = await getCloudCollection(botId);
-    const queryEmbedding = await embeddingsModel().embedQuery(query);
-    const result = await collection.query({
-      queryEmbeddings: [queryEmbedding],
-      nResults: 12,
-      where: { botId },
-      include: ["documents", "metadatas"],
-    });
+
+    // Try external embedding first, fall back to Chroma's queryTexts
+    const queryEmbedding = await generateQueryEmbedding(query);
+
+    let result;
+    if (queryEmbedding) {
+      result = await collection.query({
+        queryEmbeddings: [queryEmbedding],
+        nResults: 12,
+        where: { botId },
+        include: ["documents", "metadatas"],
+      });
+    } else {
+      // Use Chroma's built-in embedding via queryTexts
+      result = await collection.query({
+        queryTexts: [query],
+        nResults: 12,
+        where: { botId },
+        include: ["documents", "metadatas"],
+      });
+    }
 
     const documents = result.documents?.[0] ?? [];
     const metadatas = result.metadatas?.[0] ?? [];
