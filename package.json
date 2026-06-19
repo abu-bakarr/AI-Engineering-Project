@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node ./scripts/dev-with-chroma.mjs",
-    "dev:next": "next dev --webpack -p 3001",
+    "dev": "next dev --webpack -p 3000",
+    "dev:next": "next dev --webpack -p 3000",
     "chroma": "chroma run --path ./rag/dataStore --host localhost --port 8000",
     "db:reset:supabase": "node ./scripts/reset-supabase.mjs",
     "build": "next build --webpack",
