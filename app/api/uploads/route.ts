@@ -113,9 +113,6 @@ async function processUploadedDocument(params: {
       const details =
         error instanceof Error ? error.message : "Unknown indexing error";
       console.warn(`Chroma indexing failed for ${document.name}: ${details}`);
-      throw new Error(
-        `Chroma indexing failed for ${document.name}: ${details}`,
-      );
     }
   }
 
@@ -245,15 +242,13 @@ export async function POST(req: NextRequest) {
         }),
       );
 
-      await appendBotDocuments(botId, processingDocs);
+      if (documents.length > 0) {
+        await appendBotDocuments(botId, documents);
+      }
 
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           const finalDocuments: BotDocument[] = [];
-          const pendingIds = new Set(
-            processingDocs.map((document) => document.id),
-          );
-          const failureReasons: Record<string, string> = {};
           try {
             controller.enqueue(
               encodeStreamEvent({
@@ -267,32 +262,14 @@ export async function POST(req: NextRequest) {
             for (let index = 0; index < uploadJobs.length; index += 1) {
               const job = uploadJobs[index];
               const placeholder = processingDocs[index];
-              let completedDoc: BotDocument;
-
-              try {
-                completedDoc = await processUploadedDocument({
-                  botId,
-                  docId: placeholder.id,
-                  file: job.file,
-                  bytes: job.bytes,
-                  hash: job.hash,
-                  rag,
-                });
-              } catch (error) {
-                const details =
-                  error instanceof Error
-                    ? error.message
-                    : "Unknown processing error";
-                console.warn(
-                  `Document processing failed for ${job.file.name}: ${details}`,
-                );
-                failureReasons[job.file.name] = details;
-                completedDoc = {
-                  ...placeholder,
-                  status: "failed",
-                  content: "",
-                };
-              }
+              const completedDoc = await processUploadedDocument({
+                botId,
+                docId: placeholder.id,
+                file: job.file,
+                bytes: job.bytes,
+                hash: job.hash,
+                rag,
+              });
 
               const persistedDoc = {
                 ...completedDoc,
@@ -300,7 +277,6 @@ export async function POST(req: NextRequest) {
               };
               await appendBotDocuments(botId, [persistedDoc]);
               finalDocuments.push(persistedDoc);
-              pendingIds.delete(placeholder.id);
 
               controller.enqueue(
                 encodeStreamEvent({
@@ -320,18 +296,13 @@ export async function POST(req: NextRequest) {
                 .filter((document) => document.status === "failed")
                 .map((document) => document.name)
                 .join(", ");
-              const failedDetails = Object.entries(failureReasons)
-                .map(([name, reason]) => `${name}: ${reason}`)
-                .join(" | ");
 
               controller.enqueue(
                 encodeStreamEvent({
                   type: "error",
-                  error: failedDetails
-                    ? `Chroma indexing failed for: ${failedDetails}`
-                    : failedNames
-                      ? `Chroma indexing failed for: ${failedNames}`
-                      : "Chroma indexing failed. No document was indexed.",
+                  error: failedNames
+                    ? `Chroma indexing failed for: ${failedNames}`
+                    : "Chroma indexing failed. No document was indexed.",
                 }),
               );
               controller.close();
@@ -347,30 +318,6 @@ export async function POST(req: NextRequest) {
             );
             controller.close();
           } catch (error) {
-            if (pendingIds.size > 0) {
-              const staleProcessing = processingDocs
-                .filter((document) => pendingIds.has(document.id))
-                .map((document) => ({
-                  ...document,
-                  status: "failed" as const,
-                  content: "",
-                }));
-
-              if (staleProcessing.length > 0) {
-                try {
-                  await appendBotDocuments(botId, staleProcessing);
-                } catch (persistError) {
-                  const persistDetails =
-                    persistError instanceof Error
-                      ? persistError.message
-                      : "Unknown status persistence error";
-                  console.warn(
-                    `Failed to persist failed status for pending documents: ${persistDetails}`,
-                  );
-                }
-              }
-            }
-
             const details =
               error instanceof Error ? error.message : "Unknown upload error";
             controller.enqueue(

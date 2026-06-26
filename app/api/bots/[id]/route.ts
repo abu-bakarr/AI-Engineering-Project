@@ -10,14 +10,24 @@ import {
 } from "@/lib/supabase-store";
 
 const DOCUMENT_PROCESSING_TTL_MS = Number(
-  process.env.DOCUMENT_PROCESSING_TTL_MS ?? "600000",
+  process.env.DOCUMENT_PROCESSING_TTL_MS ?? "120000",
+);
+const DOCUMENT_PLACEHOLDER_TTL_MS = Number(
+  process.env.DOCUMENT_PLACEHOLDER_TTL_MS ?? "45000",
 );
 
 function isStaleProcessingDocument(document: BotDocument): boolean {
   if (document.status !== "processing") return false;
   const uploadedAtMs = Date.parse(document.uploadedAt);
   if (!Number.isFinite(uploadedAtMs)) return false;
-  return Date.now() - uploadedAtMs > DOCUMENT_PROCESSING_TTL_MS;
+
+  const ageMs = Date.now() - uploadedAtMs;
+  const looksLikePlaceholder =
+    !document.storedName && !document.content?.trim();
+  if (looksLikePlaceholder) {
+    return ageMs > DOCUMENT_PLACEHOLDER_TTL_MS;
+  }
+  return ageMs > DOCUMENT_PROCESSING_TTL_MS;
 }
 
 export async function GET(
