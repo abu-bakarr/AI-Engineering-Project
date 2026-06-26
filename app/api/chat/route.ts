@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           reply:
-            "I can only answer questions that are supported by the uploaded policy corpus.",
+            "I can only answer questions that are supported by the uploaded documents.",
           citations: [],
           latencyMs: Math.round(performance.now() - startedAt),
         } satisfies ChatResponse,

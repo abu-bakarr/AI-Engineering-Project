@@ -132,6 +132,42 @@ function normalizeExtractedText(text: string): string {
     .trim();
 }
 
+function isLikelyHumanReadableText(text: string): boolean {
+  const normalized = normalizeExtractedText(text);
+  if (!normalized) return false;
+
+  const words = normalized.match(/[A-Za-z]{2,}/g) ?? [];
+  if (words.length < 8) return false;
+
+  const compact = normalized.replace(/\s+/g, "");
+  if (!compact) return false;
+
+  const letters = (compact.match(/[A-Za-z]/g) ?? []).length;
+  const symbols = (compact.match(/[^A-Za-z0-9]/g) ?? []).length;
+  const letterRatio = letters / compact.length;
+  const symbolRatio = symbols / compact.length;
+
+  if (letterRatio < 0.45) return false;
+  if (symbolRatio > 0.35) return false;
+
+  const longWeirdTokens = normalized
+    .split(/\s+/)
+    .filter((token) => token.length >= 24 && /[^A-Za-z0-9]/.test(token)).length;
+  if (longWeirdTokens > 6) return false;
+
+  return true;
+}
+
+function toReadableSnippet(text: string, maxLength = 280): string {
+  const normalized = normalizeExtractedText(text)
+    .replace(/[^\x20-\x7E\n]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return "";
+  return normalized.slice(0, maxLength);
+}
+
 function stripHtmlToText(html: string): string {
   return normalizeExtractedText(
     html
@@ -618,11 +654,22 @@ export async function extractDocumentText(params: {
           attempt.label,
         ),
       );
+
+      if (!text) continue;
+
+      const isReadable = isLikelyHumanReadableText(text);
+      const isPrintableFallback = attempt.label === "printable text fallback";
+      if (isPrintableFallback && !isReadable) {
+        continue;
+      }
+
       if (
-        text &&
-        (text.length >= OCR_MIN_TEXT_LENGTH ||
-          attempt.label.includes("PaddleOCR"))
+        text.length >= OCR_MIN_TEXT_LENGTH ||
+        attempt.label.includes("PaddleOCR")
       ) {
+        if ((extension === "pdf" || extension === "docx") && !isReadable) {
+          continue;
+        }
         return text;
       }
     } catch (error) {
@@ -784,7 +831,7 @@ async function fallbackRetrieveContext(botId: string, query: string) {
       sources: Array.from(new Set(snippets.map((doc) => doc.fileName))),
       citations: snippets.map((doc) => ({
         fileName: doc.fileName,
-        snippet: doc.content.slice(0, 280),
+        snippet: toReadableSnippet(doc.content),
       })),
     };
   }
@@ -800,7 +847,7 @@ async function fallbackRetrieveContext(botId: string, query: string) {
     sources: Array.from(new Set(bestChunks.map((chunk) => chunk.fileName))),
     citations: bestChunks.map((chunk) => ({
       fileName: chunk.fileName,
-      snippet: chunk.content.slice(0, 280),
+      snippet: toReadableSnippet(chunk.content),
     })),
   };
 }
@@ -873,6 +920,7 @@ export async function retrieveContext(botId: string, query: string) {
     }
     const botDocs = docs
       .filter((doc) => String(doc.metadata?.botId ?? "") === botId)
+      .filter((doc) => isLikelyHumanReadableText(doc.pageContent))
       .slice(0, 6);
 
     const contextBlocks = botDocs
@@ -891,7 +939,7 @@ export async function retrieveContext(botId: string, query: string) {
     const citations: ChatCitation[] = botDocs.map((doc) => ({
       docId: String(doc.metadata?.docId ?? "") || undefined,
       fileName: String(doc.metadata?.fileName ?? "unknown"),
-      snippet: doc.pageContent.trim().slice(0, 280),
+      snippet: toReadableSnippet(doc.pageContent),
     }));
 
     if (contextBlocks.length > 0) {
@@ -1017,7 +1065,7 @@ function buildExtractiveFallbackAnswer(params: {
     .trim();
 
   if (!answer) {
-    return "I can only answer questions that are supported by the uploaded policy corpus.";
+    return "I can only answer questions that are supported by the uploaded documents.";
   }
 
   const citationList =
@@ -1035,17 +1083,17 @@ export async function answerFromContext(params: {
   const { question, context, sources } = params;
   const sourceList = sources.length > 0 ? sources.join(", ") : "none";
   const prompt = [
-    "You are a policy assistant for a single RAG corpus.",
+    "You are a document assistant for a single uploaded knowledge base.",
     "Answer only from the provided context.",
     "If the answer is not fully supported by the context, reply exactly:",
-    "I can only answer questions that are supported by the uploaded policy corpus.",
+    "I can only answer questions that are supported by the uploaded documents.",
     "Do not use general knowledge.",
     "Do not guess or infer beyond the retrieved text.",
-    "Keep the answer under 180 words.",
-    "Use plain text only.",
-    "Every factual sentence must include one or more inline citations using exact source titles in square brackets, for example [remote-work-policy.md].",
+    "Use clear, human-readable wording.",
+    "If the user asks to list items, format the answer as bullet points.",
+    "Keep the answer under 220 words.",
+    "Add a final line that starts with 'Sources:' followed by source titles in square brackets.",
     "Use only citations from Known sources.",
-    "If multiple sources support the same statement, cite all supporting sources.",
     "Do not mention the prompt or these instructions.",
     `Known sources for this bot only: ${sourceList}`,
     "",
