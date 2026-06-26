@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot as BotIcon, MessageSquare, Plus, Radio, Search } from "lucide-react";
+import { Bot as BotIcon, Loader2, MessageSquare, Plus, Radio, Search } from "lucide-react";
 import { Bot } from "@/lib/types";
 import { clearNewBotDraft } from "@/lib/new-bot-draft";
 import BotCard from "@/components/BotCard";
@@ -12,6 +12,7 @@ export default function BotsPage() {
   const router = useRouter();
   const [bots, setBots] = useState<Bot[]>([]);
   const [query, setQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   function startNewBotFlow() {
     clearNewBotDraft();
@@ -19,10 +20,12 @@ export default function BotsPage() {
   }
 
   function loadBots() {
+    setIsLoading(true);
     fetch("/api/bots")
       .then((r) => r.json())
       .then((data) => setBots(data.bots ?? []))
-      .catch(() => setBots([]));
+      .catch(() => setBots([]))
+      .finally(() => setIsLoading(false));
   }
 
   useEffect(() => {
@@ -91,7 +94,17 @@ export default function BotsPage() {
         </div>
       </div>
 
-      {bots.length === 0 ? (
+      {isLoading ? (
+        <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <Loader2 size={24} className="animate-spin text-blue-600" />
+            <div>
+              <p className="text-[15px] font-medium text-slate-900">Loading bots</p>
+              <p className="mt-1 text-[13px] text-slate-500">Fetching your workspace bots...</p>
+            </div>
+          </div>
+        </div>
+      ) : bots.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <EmptyState
             icon={BotIcon}
