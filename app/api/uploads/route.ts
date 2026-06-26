@@ -4,7 +4,6 @@ import {
   appendBotDocuments,
   documentStoragePath,
   getBotById,
-  replaceBotDocuments,
   uploadDocumentObject,
 } from "@/lib/supabase-store";
 import crypto from "node:crypto";
@@ -114,7 +113,9 @@ async function processUploadedDocument(params: {
       const details =
         error instanceof Error ? error.message : "Unknown indexing error";
       console.warn(`Chroma indexing failed for ${document.name}: ${details}`);
-      throw new Error(`Chroma indexing failed for ${document.name}: ${details}`);
+      throw new Error(
+        `Chroma indexing failed for ${document.name}: ${details}`,
+      );
     }
   }
 
@@ -244,13 +245,14 @@ export async function POST(req: NextRequest) {
         }),
       );
 
-      const existingDocuments = [...bot.documents, ...documents];
-      const persistedDocuments = [...existingDocuments, ...processingDocs];
       await appendBotDocuments(botId, processingDocs);
 
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
-          const nextDocuments = [...persistedDocuments];
+          const finalDocuments: BotDocument[] = [];
+          const pendingIds = new Set(
+            processingDocs.map((document) => document.id),
+          );
           const failureReasons: Record<string, string> = {};
           try {
             controller.enqueue(
@@ -292,12 +294,13 @@ export async function POST(req: NextRequest) {
                 };
               }
 
-              nextDocuments[index + existingDocuments.length] = {
+              const persistedDoc = {
                 ...completedDoc,
                 id: placeholder.id,
               };
-
-              await replaceBotDocuments(botId, nextDocuments);
+              await appendBotDocuments(botId, [persistedDoc]);
+              finalDocuments.push(persistedDoc);
+              pendingIds.delete(placeholder.id);
 
               controller.enqueue(
                 encodeStreamEvent({
@@ -308,10 +311,6 @@ export async function POST(req: NextRequest) {
                 }),
               );
             }
-
-            const finalDocuments = nextDocuments.slice(
-              existingDocuments.length,
-            );
 
             const readyDocuments = finalDocuments.filter(
               (document) => document.status === "ready",
@@ -348,6 +347,30 @@ export async function POST(req: NextRequest) {
             );
             controller.close();
           } catch (error) {
+            if (pendingIds.size > 0) {
+              const staleProcessing = processingDocs
+                .filter((document) => pendingIds.has(document.id))
+                .map((document) => ({
+                  ...document,
+                  status: "failed" as const,
+                  content: "",
+                }));
+
+              if (staleProcessing.length > 0) {
+                try {
+                  await appendBotDocuments(botId, staleProcessing);
+                } catch (persistError) {
+                  const persistDetails =
+                    persistError instanceof Error
+                      ? persistError.message
+                      : "Unknown status persistence error";
+                  console.warn(
+                    `Failed to persist failed status for pending documents: ${persistDetails}`,
+                  );
+                }
+              }
+            }
+
             const details =
               error instanceof Error ? error.message : "Unknown upload error";
             controller.enqueue(
@@ -366,16 +389,20 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    for (const job of uploadJobs) {
-      const document = await processUploadedDocument({
-        botId,
-        docId: crypto.randomUUID(),
-        file: job.file,
-        bytes: job.bytes,
-        hash: job.hash,
-        rag,
-      });
-      documents.push(document);
+    if (uploadJobs.length > 0) {
+      const processed = await Promise.all(
+        uploadJobs.map((job) =>
+          processUploadedDocument({
+            botId,
+            docId: crypto.randomUUID(),
+            file: job.file,
+            bytes: job.bytes,
+            hash: job.hash,
+            rag,
+          }),
+        ),
+      );
+      documents.push(...processed);
     }
 
     if (

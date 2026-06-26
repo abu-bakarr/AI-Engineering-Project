@@ -9,6 +9,17 @@ import {
   updateBot,
 } from "@/lib/supabase-store";
 
+const DOCUMENT_PROCESSING_TTL_MS = Number(
+  process.env.DOCUMENT_PROCESSING_TTL_MS ?? "600000",
+);
+
+function isStaleProcessingDocument(document: BotDocument): boolean {
+  if (document.status !== "processing") return false;
+  const uploadedAtMs = Date.parse(document.uploadedAt);
+  if (!Number.isFinite(uploadedAtMs)) return false;
+  return Date.now() - uploadedAtMs > DOCUMENT_PROCESSING_TTL_MS;
+}
+
 export async function GET(
   _: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -16,6 +27,28 @@ export async function GET(
   const { id } = await params;
   const bot = await getBotById(id);
   if (!bot) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const staleIds = new Set(
+    bot.documents
+      .filter((document) => isStaleProcessingDocument(document as BotDocument))
+      .map((document) => document.id),
+  );
+
+  if (staleIds.size > 0) {
+    const recoveredDocuments = bot.documents.map((document) =>
+      staleIds.has(document.id)
+        ? {
+            ...document,
+            status: "failed" as const,
+            content: document.content ?? "",
+          }
+        : document,
+    );
+
+    await replaceBotDocuments(id, recoveredDocuments);
+    bot.documents = recoveredDocuments;
+  }
+
   return NextResponse.json({ bot });
 }
 

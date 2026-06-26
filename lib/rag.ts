@@ -18,12 +18,15 @@ import { BotDocument, ChatCitation } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const CHROMA_API_KEY = process.env.CHROMA_API_KEY?.trim();
+const CHROMA_API_KEY =
+  process.env.CHROMA_CLOUD_API_KEY?.trim() ??
+  process.env.CHROMA_API_KEY?.trim();
 const CHROMA_TENANT = process.env.CHROMA_TENANT?.trim();
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
-const CHROMA_CLOUD_URL =
-  process.env.CHROMA_CLOUD_URL?.trim() || "https://api.trychroma.com";
+const CHROMA_CLOUD_URL = process.env.CHROMA_CLOUD_URL?.trim();
 const CHROMA_URL = process.env.CHROMA_URL?.trim() || "http://localhost:8000";
+const CHROMA_PREFER_CLOUD =
+  (process.env.CHROMA_PREFER_CLOUD ?? "true").toLowerCase() !== "false";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
 let chromaClient: ChromaClient | null = null;
 const chromaCollections = new Map<string, Collection>();
@@ -653,8 +656,7 @@ function embeddingsModel(): OpenAIEmbeddings {
       defaultHeaders: {
         "HTTP-Referer":
           process.env.OPENROUTER_REFERER ?? "http://localhost:3000",
-        "X-Title":
-          process.env.OPENROUTER_APP_NAME ?? "RAG Chatbot Platform",
+        "X-Title": process.env.OPENROUTER_APP_NAME ?? "RAG Chatbot Platform",
       },
     },
   });
@@ -681,15 +683,28 @@ function parseChromaUrl(urlValue: string): {
 function getChromaClient(): ChromaClient {
   if (chromaClient) return chromaClient;
 
-  if (CHROMA_API_KEY) {
+  const cloudRequested =
+    CHROMA_PREFER_CLOUD &&
+    Boolean(
+      CHROMA_API_KEY || CHROMA_TENANT || CHROMA_DATABASE || CHROMA_CLOUD_URL,
+    );
+
+  if (cloudRequested) {
     if (!CHROMA_TENANT) {
       throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
     }
     if (!CHROMA_DATABASE) {
       throw new Error("CHROMA_DATABASE is required for Chroma Cloud.");
     }
+    if (!CHROMA_API_KEY) {
+      throw new Error(
+        "CHROMA_API_KEY (or CHROMA_CLOUD_API_KEY) is required for Chroma Cloud.",
+      );
+    }
 
-    const { host, port } = parseChromaUrl(CHROMA_CLOUD_URL);
+    const { host, port } = parseChromaUrl(
+      CHROMA_CLOUD_URL || "https://api.trychroma.com",
+    );
 
     chromaClient = new CloudClient({
       apiKey: CHROMA_API_KEY,
@@ -885,7 +900,9 @@ function rerankRetrievedDocs(docs: Document[], query: string): Document[] {
     .map((entry) => entry.doc);
 }
 
-async function generateEmbeddings(documents: string[]): Promise<number[][] | null> {
+async function generateEmbeddings(
+  documents: string[],
+): Promise<number[][] | null> {
   try {
     const embeddings = await embeddingsModel().embedDocuments(documents);
     if (
@@ -894,13 +911,18 @@ async function generateEmbeddings(documents: string[]): Promise<number[][] | nul
       embeddings.length !== documents.length ||
       embeddings.some((e) => !Array.isArray(e) || e.length === 0)
     ) {
-      console.warn("Embeddings API returned invalid data, using Chroma built-in embeddings.");
+      console.warn(
+        "Embeddings API returned invalid data, using Chroma built-in embeddings.",
+      );
       return null;
     }
     return embeddings;
   } catch (error) {
-    const details = error instanceof Error ? error.message : "Unknown embedding error";
-    console.warn(`Embeddings API failed: ${details}. Using Chroma built-in embeddings.`);
+    const details =
+      error instanceof Error ? error.message : "Unknown embedding error";
+    console.warn(
+      `Embeddings API failed: ${details}. Using Chroma built-in embeddings.`,
+    );
     return null;
   }
 }
@@ -1045,7 +1067,12 @@ export async function retrieveContext(botId: string, query: string) {
           score: scoreChunk(pageContent, normalizeQueryTerms(query)),
         };
       })
-      .filter((item): item is { pageContent: string; metadata: Metadata; score: number } => Boolean(item))
+      .filter(
+        (
+          item,
+        ): item is { pageContent: string; metadata: Metadata; score: number } =>
+          Boolean(item),
+      )
       .sort((a, b) => b.score - a.score)
       .slice(0, 6);
 
