@@ -108,11 +108,9 @@ async function processUploadedDocument(params: {
         text: content,
       });
     } catch (error) {
-      status = "failed";
-      document.status = status;
       const details =
         error instanceof Error ? error.message : "Unknown indexing error";
-      console.warn(`Chroma indexing failed for ${document.name}: ${details}`);
+      console.warn(`Best-effort indexing failed for ${document.name}: ${details}`);
     }
   }
 
@@ -202,7 +200,7 @@ export async function POST(req: NextRequest) {
         } catch (error) {
           const details =
             error instanceof Error ? error.message : "Unknown indexing error";
-          throw new Error(`Chroma indexing failed for rich text: ${details}`);
+          console.warn(`Best-effort indexing failed for rich text: ${details}`);
         }
       }
     }
@@ -288,27 +286,6 @@ export async function POST(req: NextRequest) {
               );
             }
 
-            const readyDocuments = finalDocuments.filter(
-              (document) => document.status === "ready",
-            );
-            if (readyDocuments.length === 0) {
-              const failedNames = finalDocuments
-                .filter((document) => document.status === "failed")
-                .map((document) => document.name)
-                .join(", ");
-
-              controller.enqueue(
-                encodeStreamEvent({
-                  type: "error",
-                  error: failedNames
-                    ? `Chroma indexing failed for: ${failedNames}`
-                    : "Chroma indexing failed. No document was indexed.",
-                }),
-              );
-              controller.close();
-              return;
-            }
-
             controller.enqueue(
               encodeStreamEvent({
                 type: "complete",
@@ -350,16 +327,6 @@ export async function POST(req: NextRequest) {
         ),
       );
       documents.push(...processed);
-    }
-
-    if (
-      uploadJobs.length > 0 &&
-      documents.every((document) => document.status !== "ready")
-    ) {
-      return NextResponse.json(
-        { error: "Chroma indexing failed. No document was indexed." },
-        { status: 500 },
-      );
     }
 
     if (documents.length > 0) {

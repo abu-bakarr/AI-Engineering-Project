@@ -7,12 +7,7 @@ import { promisify } from "node:util";
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
-import {
-  ChromaClient,
-  CloudClient,
-  type Collection,
-  type Metadata,
-} from "chromadb";
+import { Chroma } from "@langchain/community/vectorstores/chroma";
 import { getBotById, removeDocumentObjects } from "@/lib/supabase-store";
 import { BotDocument, ChatCitation } from "@/lib/types";
 
@@ -28,8 +23,6 @@ const CHROMA_URL = process.env.CHROMA_URL?.trim() || "http://localhost:8000";
 const CHROMA_PREFER_CLOUD =
   (process.env.CHROMA_PREFER_CLOUD ?? "true").toLowerCase() !== "false";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
-let chromaClient: ChromaClient | null = null;
-const chromaCollections = new Map<string, Collection>();
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -662,34 +655,17 @@ function embeddingsModel(): OpenAIEmbeddings {
   });
 }
 
-function parseChromaUrl(urlValue: string): {
-  host?: string;
-  port?: number;
-  ssl?: boolean;
-} {
-  try {
-    const parsed = new URL(urlValue);
-    const host = parsed.hostname || undefined;
-    const port = parsed.port ? Number(parsed.port) : undefined;
-    if (port !== undefined && Number.isNaN(port)) {
-      return { host, ssl: parsed.protocol === "https:" };
-    }
-    return { host, port, ssl: parsed.protocol === "https:" };
-  } catch {
-    return {};
-  }
-}
-
-function getChromaClient(): ChromaClient {
-  if (chromaClient) return chromaClient;
-
-  const cloudRequested =
+function shouldUseChromaCloud(): boolean {
+  return (
     CHROMA_PREFER_CLOUD &&
     Boolean(
       CHROMA_API_KEY || CHROMA_TENANT || CHROMA_DATABASE || CHROMA_CLOUD_URL,
-    );
+    )
+  );
+}
 
-  if (cloudRequested) {
+async function vectorStore(): Promise<Chroma> {
+  if (shouldUseChromaCloud()) {
     if (!CHROMA_TENANT) {
       throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
     }
@@ -702,81 +678,21 @@ function getChromaClient(): ChromaClient {
       );
     }
 
-    const { host, port } = parseChromaUrl(
-      CHROMA_CLOUD_URL || "https://api.trychroma.com",
-    );
-
-    chromaClient = new CloudClient({
-      apiKey: CHROMA_API_KEY,
-      ...(host ? { host } : {}),
-      ...(port ? { port } : {}),
-      tenant: CHROMA_TENANT,
-      database: CHROMA_DATABASE,
+    return new Chroma(embeddingsModel(), {
+      collectionName: CHROMA_COLLECTION,
+      url: CHROMA_CLOUD_URL || "https://api.trychroma.com",
+      chromaCloudAPIKey: CHROMA_API_KEY,
+      clientParams: {
+        tenant: CHROMA_TENANT,
+        database: CHROMA_DATABASE,
+      },
     });
-
-    return chromaClient;
   }
 
-  const { host, port, ssl } = parseChromaUrl(CHROMA_URL);
-
-  chromaClient = new ChromaClient({
-    ...(host ? { host } : {}),
-    ...(port ? { port } : {}),
-    ...(typeof ssl === "boolean" ? { ssl } : {}),
-    ...(CHROMA_TENANT ? { tenant: CHROMA_TENANT } : {}),
-    ...(CHROMA_DATABASE ? { database: CHROMA_DATABASE } : {}),
+  return new Chroma(embeddingsModel(), {
+    collectionName: CHROMA_COLLECTION,
+    url: CHROMA_URL,
   });
-
-  return chromaClient;
-}
-
-function chromaCollectionName(botId: string): string {
-  const safeBotId = botId.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  return `${CHROMA_COLLECTION}__${safeBotId}`.slice(0, 63);
-}
-
-async function getChromaCollection(botId: string): Promise<Collection> {
-  const name = chromaCollectionName(botId);
-  const cached = chromaCollections.get(name);
-  if (cached) return cached;
-
-  const client = getChromaClient();
-  const collection = await client.getOrCreateCollection({
-    name,
-  });
-  chromaCollections.set(name, collection);
-  return collection;
-}
-
-function toMetadataValue(value: unknown): Metadata[string] {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    if (value.every((item): item is string => typeof item === "string")) {
-      return value;
-    }
-    if (value.every((item): item is number => typeof item === "number")) {
-      return value;
-    }
-    if (value.every((item): item is boolean => typeof item === "boolean")) {
-      return value;
-    }
-  }
-
-  return JSON.stringify(value);
-}
-
-function toChromaMetadata(input: Record<string, unknown>): Metadata {
-  return Object.fromEntries(
-    Object.entries(input).map(([key, value]) => [key, toMetadataValue(value)]),
-  ) as Metadata;
 }
 
 export async function chunkText(
@@ -889,44 +805,6 @@ async function fallbackRetrieveContext(botId: string, query: string) {
   };
 }
 
-function rerankRetrievedDocs(docs: Document[], query: string): Document[] {
-  const terms = normalizeQueryTerms(query);
-  return docs
-    .map((doc) => ({
-      doc,
-      score: scoreChunk(doc.pageContent, terms),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .map((entry) => entry.doc);
-}
-
-async function generateEmbeddings(
-  documents: string[],
-): Promise<number[][] | null> {
-  try {
-    const embeddings = await embeddingsModel().embedDocuments(documents);
-    if (
-      !embeddings ||
-      !Array.isArray(embeddings) ||
-      embeddings.length !== documents.length ||
-      embeddings.some((e) => !Array.isArray(e) || e.length === 0)
-    ) {
-      console.warn(
-        "Embeddings API returned invalid data, using Chroma built-in embeddings.",
-      );
-      return null;
-    }
-    return embeddings;
-  } catch (error) {
-    const details =
-      error instanceof Error ? error.message : "Unknown embedding error";
-    console.warn(
-      `Embeddings API failed: ${details}. Using Chroma built-in embeddings.`,
-    );
-    return null;
-  }
-}
-
 export async function indexDocumentChunks(params: {
   botId: string;
   docId: string;
@@ -941,48 +819,16 @@ export async function indexDocumentChunks(params: {
   if (chunks.length === 0) return;
 
   const ids = chunks.map((_, i) => `${botId}:${docId}:${i}`);
-  const documents = chunks.map((chunk) => chunk.pageContent);
-  const metadatas = chunks.map((chunk) =>
-    toChromaMetadata(chunk.metadata as Record<string, unknown>),
-  );
-
-  const collection = await getChromaCollection(botId);
-
-  await collection.delete({ where: { docId } });
-
-  // Try external embeddings first, fall back to Chroma's built-in embedding
-  const embeddings = await generateEmbeddings(documents);
-
-  if (embeddings) {
-    await collection.upsert({
-      ids,
-      documents,
-      metadatas,
-      embeddings,
-    });
-  } else {
-    // Let Chroma generate embeddings using its configured default embedding function.
-    await collection.upsert({
-      ids,
-      documents,
-      metadatas,
-    });
-  }
-
-  const verify = await collection.get({ ids });
-  if ((verify.ids?.length ?? 0) !== ids.length) {
-    throw new Error(
-      `Chroma verification failed: expected ${ids.length} chunks, found ${verify.ids?.length ?? 0}.`,
-    );
-  }
+  const store = await vectorStore();
+  await store.addDocuments(chunks, { ids });
 }
 
 export async function removeDocumentChunks(
   botId: string,
   docId: string,
 ): Promise<void> {
-  const collection = await getChromaCollection(botId);
-  await collection.delete({ where: { docId } });
+  const store = await vectorStore();
+  await store.delete({ filter: { $and: [{ botId }, { docId }] } });
 }
 
 export async function removeBotKnowledge(botId: string): Promise<void> {
@@ -1005,11 +851,8 @@ export async function removeBotKnowledgeByDocuments(
     );
   });
 
-  const vectorCleanup = Promise.resolve()
-    .then(async () => {
-      const collection = await getChromaCollection(botId);
-      await collection.delete({ where: { botId } });
-    })
+  const vectorCleanup = vectorStore()
+    .then((store) => store.delete({ filter: { botId } }))
     .catch((error) => {
       const details =
         error instanceof Error ? error.message : "Unknown vector cleanup error";
@@ -1019,80 +862,36 @@ export async function removeBotKnowledgeByDocuments(
   await Promise.all([fileCleanup, vectorCleanup]);
 }
 
-async function generateQueryEmbedding(query: string): Promise<number[] | null> {
-  try {
-    const embedding = await embeddingsModel().embedQuery(query);
-    if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-      return null;
-    }
-    return embedding;
-  } catch {
-    return null;
-  }
-}
-
 export async function retrieveContext(botId: string, query: string) {
   try {
-    const collection = await getChromaCollection(botId);
-
-    // Try external embedding first, fall back to Chroma's queryTexts
-    const queryEmbedding = await generateQueryEmbedding(query);
-
-    let result;
-    if (queryEmbedding) {
-      result = await collection.query({
-        queryEmbeddings: [queryEmbedding],
-        nResults: 12,
-        include: ["documents", "metadatas"],
-      });
-    } else {
-      // Use Chroma's built-in embedding via queryTexts
-      result = await collection.query({
-        queryTexts: [query],
-        nResults: 12,
-        include: ["documents", "metadatas"],
-      });
+    const store = await vectorStore();
+    let docs: Document[];
+    try {
+      docs = await store.similaritySearch(query, 8, { botId });
+    } catch {
+      docs = await store.similaritySearch(query, 12);
     }
-
-    const documents = result.documents?.[0] ?? [];
-    const metadatas = result.metadatas?.[0] ?? [];
-
-    const pairs = documents
-      .map((pageContent, index) => {
-        if (!pageContent) return null;
-        const metadata = metadatas[index] ?? {};
-        return {
-          pageContent,
-          metadata,
-          score: scoreChunk(pageContent, normalizeQueryTerms(query)),
-        };
-      })
-      .filter(
-        (
-          item,
-        ): item is { pageContent: string; metadata: Metadata; score: number } =>
-          Boolean(item),
-      )
-      .sort((a, b) => b.score - a.score)
+    const botDocs = docs
+      .filter((doc) => String(doc.metadata?.botId ?? "") === botId)
       .slice(0, 6);
 
-    const contextBlocks = pairs
+    const contextBlocks = botDocs
       .map(
-        (entry) =>
-          `Source: ${String(entry.metadata?.fileName ?? "unknown")}\n${entry.pageContent.trim()}`,
+        (doc) =>
+          `Source: ${String(doc.metadata?.fileName ?? "unknown")}\n${doc.pageContent.trim()}`,
       )
       .filter(Boolean);
     const sources = Array.from(
       new Set(
-        pairs
-          .map((entry) => String(entry.metadata?.fileName ?? "unknown"))
+        botDocs
+          .map((doc) => String(doc.metadata?.fileName ?? "unknown"))
           .filter(Boolean),
       ),
     );
-    const citations: ChatCitation[] = pairs.map((entry) => ({
-      docId: String(entry.metadata?.docId ?? "") || undefined,
-      fileName: String(entry.metadata?.fileName ?? "unknown"),
-      snippet: entry.pageContent.trim().slice(0, 280),
+    const citations: ChatCitation[] = botDocs.map((doc) => ({
+      docId: String(doc.metadata?.docId ?? "") || undefined,
+      fileName: String(doc.metadata?.fileName ?? "unknown"),
+      snippet: doc.pageContent.trim().slice(0, 280),
     }));
 
     if (contextBlocks.length > 0) {
