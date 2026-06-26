@@ -21,9 +21,9 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY?.trim();
 const CHROMA_TENANT = process.env.CHROMA_TENANT?.trim();
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
-const CHROMA_URL =
-  process.env.CHROMA_URL?.trim() ||
-  (CHROMA_API_KEY ? "https://api.trychroma.com" : "http://localhost:8000");
+const CHROMA_CLOUD_URL =
+  process.env.CHROMA_CLOUD_URL?.trim() || "https://api.trychroma.com";
+const CHROMA_URL = process.env.CHROMA_URL?.trim() || "http://localhost:8000";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
 let chromaClient: ChromaClient | null = null;
 const chromaCollections = new Map<string, Collection>();
@@ -681,8 +681,6 @@ function parseChromaUrl(urlValue: string): {
 function getChromaClient(): ChromaClient {
   if (chromaClient) return chromaClient;
 
-  const { host, port, ssl } = parseChromaUrl(CHROMA_URL);
-
   if (CHROMA_API_KEY) {
     if (!CHROMA_TENANT) {
       throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
@@ -690,6 +688,8 @@ function getChromaClient(): ChromaClient {
     if (!CHROMA_DATABASE) {
       throw new Error("CHROMA_DATABASE is required for Chroma Cloud.");
     }
+
+    const { host, port } = parseChromaUrl(CHROMA_CLOUD_URL);
 
     chromaClient = new CloudClient({
       apiKey: CHROMA_API_KEY,
@@ -701,6 +701,8 @@ function getChromaClient(): ChromaClient {
 
     return chromaClient;
   }
+
+  const { host, port, ssl } = parseChromaUrl(CHROMA_URL);
 
   chromaClient = new ChromaClient({
     ...(host ? { host } : {}),
@@ -924,7 +926,7 @@ export async function indexDocumentChunks(params: {
 
   const collection = await getChromaCollection(botId);
 
-  await collection.delete({ where: { botId, docId } });
+  await collection.delete({ where: { docId } });
 
   // Try external embeddings first, fall back to Chroma's built-in embedding
   const embeddings = await generateEmbeddings(documents);
@@ -958,7 +960,7 @@ export async function removeDocumentChunks(
   docId: string,
 ): Promise<void> {
   const collection = await getChromaCollection(botId);
-  await collection.delete({ where: { botId, docId } });
+  await collection.delete({ where: { docId } });
 }
 
 export async function removeBotKnowledge(botId: string): Promise<void> {
@@ -1019,7 +1021,6 @@ export async function retrieveContext(botId: string, query: string) {
       result = await collection.query({
         queryEmbeddings: [queryEmbedding],
         nResults: 12,
-        where: { botId },
         include: ["documents", "metadatas"],
       });
     } else {
@@ -1027,7 +1028,6 @@ export async function retrieveContext(botId: string, query: string) {
       result = await collection.query({
         queryTexts: [query],
         nResults: 12,
-        where: { botId },
         include: ["documents", "metadatas"],
       });
     }
