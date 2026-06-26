@@ -23,6 +23,8 @@ const CHROMA_URL = process.env.CHROMA_URL?.trim() || "http://localhost:8000";
 const CHROMA_PREFER_CLOUD =
   (process.env.CHROMA_PREFER_CLOUD ?? "true").toLowerCase() !== "false";
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
+const CHROMA_BOT_COLLECTION_PREFIX =
+  process.env.CHROMA_BOT_COLLECTION_PREFIX ?? CHROMA_COLLECTION;
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -136,8 +138,24 @@ function isLikelyHumanReadableText(text: string): boolean {
   const normalized = normalizeExtractedText(text);
   if (!normalized) return false;
 
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length < 6) return false;
+
   const words = normalized.match(/[A-Za-z]{2,}/g) ?? [];
-  if (words.length < 8) return false;
+  if (words.length < 6) return false;
+
+  const alphaTokens = tokens.filter((token) => /[A-Za-z]/.test(token));
+  if (alphaTokens.length === 0) return false;
+
+  const singleCharAlphaTokens = alphaTokens.filter((token) =>
+    /^[A-Za-z]$/.test(token),
+  ).length;
+  const singleCharRatio = singleCharAlphaTokens / alphaTokens.length;
+  if (singleCharRatio > 0.38) return false;
+
+  const avgTokenLength =
+    tokens.reduce((sum, token) => sum + token.length, 0) / tokens.length;
+  if (tokens.length >= 20 && avgTokenLength < 3.2) return false;
 
   const compact = normalized.replace(/\s+/g, "");
   if (!compact) return false;
@@ -156,6 +174,27 @@ function isLikelyHumanReadableText(text: string): boolean {
   if (longWeirdTokens > 6) return false;
 
   return true;
+}
+
+function normalizeAnswerText(answer: string): string {
+  return answer
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function isLikelyHumanReadableAnswer(answer: string): boolean {
+  const normalized = normalizeAnswerText(answer);
+  if (!normalized) return false;
+  if (normalized.length < 12) return false;
+
+  const hasSentenceLikeStructure = /[A-Za-z]{2,}[\s\S]*[.!?:]/.test(normalized);
+  const hasBullets = /(^|\n)\s*[-*]\s+[A-Za-z]/.test(normalized);
+  if (!hasSentenceLikeStructure && !hasBullets) return false;
+
+  return isLikelyHumanReadableText(normalized);
 }
 
 function toReadableSnippet(text: string, maxLength = 280): string {
@@ -711,7 +750,29 @@ function shouldUseChromaCloud(): boolean {
   );
 }
 
-async function vectorStore(): Promise<Chroma> {
+function toCollectionSlug(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "bot";
+}
+
+function botCollectionName(botId: string): string {
+  const slug = toCollectionSlug(botId);
+  const hashSuffix = crypto
+    .createHash("sha1")
+    .update(botId)
+    .digest("hex")
+    .slice(0, 8);
+  return `${CHROMA_BOT_COLLECTION_PREFIX}_bot_${slug}_${hashSuffix}`;
+}
+
+async function vectorStoreForCollection(
+  collectionName: string,
+): Promise<Chroma> {
   if (shouldUseChromaCloud()) {
     if (!CHROMA_TENANT) {
       throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
@@ -726,7 +787,7 @@ async function vectorStore(): Promise<Chroma> {
     }
 
     return new Chroma(embeddingsModel(), {
-      collectionName: CHROMA_COLLECTION,
+      collectionName,
       url: CHROMA_CLOUD_URL || "https://api.trychroma.com",
       chromaCloudAPIKey: CHROMA_API_KEY,
       clientParams: {
@@ -737,9 +798,17 @@ async function vectorStore(): Promise<Chroma> {
   }
 
   return new Chroma(embeddingsModel(), {
-    collectionName: CHROMA_COLLECTION,
+    collectionName,
     url: CHROMA_URL,
   });
+}
+
+async function vectorStoreForBot(botId: string): Promise<Chroma> {
+  return vectorStoreForCollection(botCollectionName(botId));
+}
+
+async function legacySharedVectorStore(): Promise<Chroma> {
+  return vectorStoreForCollection(CHROMA_COLLECTION);
 }
 
 export async function chunkText(
@@ -784,7 +853,10 @@ async function fallbackRetrieveContext(botId: string, query: string) {
   }
 
   const queryTerms = normalizeQueryTerms(query);
-  const docsWithContent = bot.documents.filter((doc) => doc.content?.trim());
+  const docsWithContent = bot.documents.filter(
+    (doc) =>
+      doc.content?.trim() && isLikelyHumanReadableText(doc.content ?? ""),
+  );
   if (docsWithContent.length === 0) {
     return {
       context: "",
@@ -809,7 +881,12 @@ async function fallbackRetrieveContext(botId: string, query: string) {
             fileName: String(chunk.metadata?.fileName ?? doc.name),
             score: scoreChunk(chunk.pageContent, queryTerms),
           }))
-          .filter((chunk) => chunk.content.length > 0 && chunk.score > 0);
+          .filter(
+            (chunk) =>
+              chunk.content.length > 0 &&
+              chunk.score > 0 &&
+              isLikelyHumanReadableText(chunk.content),
+          );
       }),
     )
   ).flat();
@@ -822,7 +899,10 @@ async function fallbackRetrieveContext(botId: string, query: string) {
         fileName: doc.name,
         score: 1,
       }))
-      .filter((doc) => doc.content.length > 0);
+      .filter(
+        (doc) =>
+          doc.content.length > 0 && isLikelyHumanReadableText(doc.content),
+      );
 
     return {
       context: snippets
@@ -866,7 +946,7 @@ export async function indexDocumentChunks(params: {
   if (chunks.length === 0) return;
 
   const ids = chunks.map((_, i) => `${botId}:${docId}:${i}`);
-  const store = await vectorStore();
+  const store = await vectorStoreForBot(botId);
   await store.addDocuments(chunks, { ids });
 }
 
@@ -874,7 +954,7 @@ export async function removeDocumentChunks(
   botId: string,
   docId: string,
 ): Promise<void> {
-  const store = await vectorStore();
+  const store = await vectorStoreForBot(botId);
   await store.delete({ filter: { $and: [{ botId }, { docId }] } });
 }
 
@@ -887,37 +967,54 @@ export async function removeBotKnowledge(botId: string): Promise<void> {
 export async function removeBotKnowledgeByDocuments(
   botId: string,
   documents: BotDocument[],
+  options?: { strict?: boolean },
 ): Promise<void> {
-  const fileCleanup = removeDocumentObjects(
-    documents.map((document) => document.storedName ?? ""),
-  ).catch((error) => {
+  const errors: string[] = [];
+
+  try {
+    await removeDocumentObjects(
+      documents.map((document) => document.storedName ?? ""),
+    );
+  } catch (error) {
     const details =
       error instanceof Error ? error.message : "Unknown file cleanup error";
-    console.warn(
-      `Supabase Storage cleanup failed for bot ${botId}: ${details}`,
-    );
-  });
+    errors.push(`Supabase Storage cleanup failed for bot ${botId}: ${details}`);
+  }
 
-  const vectorCleanup = vectorStore()
-    .then((store) => store.delete({ filter: { botId } }))
-    .catch((error) => {
-      const details =
-        error instanceof Error ? error.message : "Unknown vector cleanup error";
-      console.warn(`Vector cleanup failed for bot ${botId}: ${details}`);
-    });
+  try {
+    const store = await vectorStoreForBot(botId);
+    await store.delete({ filter: { botId } });
+  } catch (error) {
+    const details =
+      error instanceof Error ? error.message : "Unknown vector cleanup error";
+    errors.push(`Vector cleanup failed for bot ${botId}: ${details}`);
+  }
 
-  await Promise.all([fileCleanup, vectorCleanup]);
+  // Backward compatibility: also clean potential vectors in the legacy shared collection.
+  try {
+    const legacyStore = await legacySharedVectorStore();
+    await legacyStore.delete({ filter: { botId } });
+  } catch (error) {
+    const details =
+      error instanceof Error
+        ? error.message
+        : "Unknown legacy vector cleanup error";
+    errors.push(`Legacy vector cleanup failed for bot ${botId}: ${details}`);
+  }
+
+  if (errors.length > 0) {
+    const message = errors.join(" | ");
+    if (options?.strict) {
+      throw new Error(message);
+    }
+    console.warn(message);
+  }
 }
 
 export async function retrieveContext(botId: string, query: string) {
   try {
-    const store = await vectorStore();
-    let docs: Document[];
-    try {
-      docs = await store.similaritySearch(query, 8, { botId });
-    } catch {
-      docs = await store.similaritySearch(query, 12);
-    }
+    const store = await vectorStoreForBot(botId);
+    const docs = await store.similaritySearch(query, 8);
     const botDocs = docs
       .filter((doc) => String(doc.metadata?.botId ?? "") === botId)
       .filter((doc) => isLikelyHumanReadableText(doc.pageContent))
@@ -947,6 +1044,41 @@ export async function retrieveContext(botId: string, query: string) {
         context: contextBlocks.join("\n\n"),
         sources,
         citations,
+      };
+    }
+
+    // Backward compatibility: try legacy shared collection for bots indexed before per-bot isolation.
+    const legacyStore = await legacySharedVectorStore();
+    const legacyDocs = await legacyStore.similaritySearch(query, 8, { botId });
+    const legacyBotDocs = legacyDocs
+      .filter((doc) => String(doc.metadata?.botId ?? "") === botId)
+      .filter((doc) => isLikelyHumanReadableText(doc.pageContent))
+      .slice(0, 6);
+
+    const legacyContextBlocks = legacyBotDocs
+      .map(
+        (doc) =>
+          `Source: ${String(doc.metadata?.fileName ?? "unknown")}\n${doc.pageContent.trim()}`,
+      )
+      .filter(Boolean);
+    const legacySources = Array.from(
+      new Set(
+        legacyBotDocs
+          .map((doc) => String(doc.metadata?.fileName ?? "unknown"))
+          .filter(Boolean),
+      ),
+    );
+    const legacyCitations: ChatCitation[] = legacyBotDocs.map((doc) => ({
+      docId: String(doc.metadata?.docId ?? "") || undefined,
+      fileName: String(doc.metadata?.fileName ?? "unknown"),
+      snippet: toReadableSnippet(doc.pageContent),
+    }));
+
+    if (legacyContextBlocks.length > 0) {
+      return {
+        context: legacyContextBlocks.join("\n\n"),
+        sources: legacySources,
+        citations: legacyCitations,
       };
     }
   } catch (error) {
@@ -1064,7 +1196,7 @@ function buildExtractiveFallbackAnswer(params: {
     .slice(0, 1200)
     .trim();
 
-  if (!answer) {
+  if (!answer || !isLikelyHumanReadableAnswer(answer)) {
     return "I can only answer questions that are supported by the uploaded documents.";
   }
 
@@ -1103,11 +1235,31 @@ export async function answerFromContext(params: {
   ].join("\n");
 
   try {
-    return await requestOpenRouterAnswer(prompt);
+    const modelAnswer = await requestOpenRouterAnswer(prompt);
+    const cleanedAnswer = normalizeAnswerText(modelAnswer);
+    if (isLikelyHumanReadableAnswer(cleanedAnswer)) {
+      return cleanedAnswer;
+    }
+
+    const fallback = buildExtractiveFallbackAnswer({
+      context,
+      question,
+      sources,
+    });
+    return isLikelyHumanReadableAnswer(fallback)
+      ? fallback
+      : "I can only answer questions that are supported by the uploaded documents.";
   } catch (error) {
     const details =
       error instanceof Error ? error.message : "Unknown OpenRouter error";
     console.warn(`OpenRouter answer generation failed: ${details}`);
-    return buildExtractiveFallbackAnswer({ context, question, sources });
+    const fallback = buildExtractiveFallbackAnswer({
+      context,
+      question,
+      sources,
+    });
+    return isLikelyHumanReadableAnswer(fallback)
+      ? fallback
+      : "I can only answer questions that are supported by the uploaded documents.";
   }
 }

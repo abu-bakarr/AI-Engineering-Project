@@ -3,7 +3,6 @@ import { BotDocument } from "@/lib/types";
 import {
   deleteBot,
   getBotById,
-  removeDocumentObjects,
   removeDocumentObject,
   replaceBotDocuments,
   updateBot,
@@ -113,22 +112,24 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  let cleanupWarning: string | null = null;
-  const storagePaths = (botToDelete.documents ?? [])
-    .map((document) => document.storedName)
-    .filter((value): value is string => Boolean(value));
-
   try {
     const { removeBotKnowledgeByDocuments } = await import("@/lib/rag");
-    if (storagePaths.length > 0) {
-      await removeDocumentObjects(storagePaths);
-    }
-    await removeBotKnowledgeByDocuments(id, botToDelete.documents ?? []);
+    await removeBotKnowledgeByDocuments(id, botToDelete.documents ?? [], {
+      strict: true,
+    });
   } catch (error) {
-    cleanupWarning =
+    const details =
       error instanceof Error
         ? error.message
         : "Failed to fully clean bot artifacts.";
+    return NextResponse.json(
+      {
+        error:
+          "Bot cleanup failed. No records were deleted so you can safely retry.",
+        details,
+      },
+      { status: 500 },
+    );
   }
 
   await deleteBot(id);
@@ -136,6 +137,6 @@ export async function DELETE(
   return NextResponse.json({
     ok: true,
     deletedDocuments: botToDelete.documents?.length ?? 0,
-    cleanupWarning,
+    cleanupWarning: null,
   });
 }
