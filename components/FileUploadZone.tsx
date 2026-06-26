@@ -12,7 +12,7 @@ interface FileUploadZoneProps {
   onFilesAdded: (files: BotDocument[]) => void;
   onDeleteDoc?: (docId: string) => void;
   allowRichText?: boolean;
-  onUploadComplete?: (files: BotDocument[]) => void;
+  onUploadStateChange?: (isUploading: boolean) => void;
 }
 
 function formatSize(bytes: number): string {
@@ -45,7 +45,13 @@ function parseJsonResponse(text: string) {
 }
 
 type UploadStreamEvent =
-  | { type: "processing"; completed: number; total: number; fileName?: string }
+  | {
+      type: "processing";
+      completed: number;
+      total: number;
+      fileName?: string;
+      documents?: BotDocument[];
+    }
   | { type: "complete"; documents: BotDocument[]; skipped?: string[] }
   | { type: "error"; error: string };
 
@@ -67,8 +73,7 @@ function uploadFormWithProgress(
       if (!chunk) return;
 
       const lines = chunk.split("\n");
-      const lastLineComplete = chunk.endsWith("\n");
-      const completeLines = lastLineComplete ? lines.slice(0, -1) : lines.slice(0, -1);
+      const completeLines = lines.slice(0, -1);
       const consumedLength = completeLines.reduce((total, line) => total + line.length + 1, 0);
       responseCursor += consumedLength;
 
@@ -129,7 +134,7 @@ export default function FileUploadZone({
   onFilesAdded,
   onDeleteDoc,
   allowRichText = false,
-  onUploadComplete,
+  onUploadStateChange,
 }: FileUploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"upload" | "text">("upload");
@@ -160,6 +165,7 @@ export default function FileUploadZone({
   }
 
   async function processFiles(raw: File[]) {
+    if (isUploading) return;
     if (!botId) {
       return;
     }
@@ -182,6 +188,7 @@ export default function FileUploadZone({
 
     try {
       setIsUploading(true);
+      onUploadStateChange?.(true);
       setUploadError("");
       setUploadProgress(0);
       setUploadStage("uploading");
@@ -195,6 +202,9 @@ export default function FileUploadZone({
         (event) => {
           if (event.type === "processing") {
             setUploadStage("processing");
+            if (event.documents?.length) {
+              onFilesAdded(event.documents);
+            }
             setProcessingSummary({
               completed: event.completed,
               total: event.total,
@@ -219,14 +229,13 @@ export default function FileUploadZone({
       onFilesAdded(data.documents ?? []);
       if ((data.documents ?? []).length === 0) {
         setUploadError("No new documents were added (possible duplicates).");
-      } else {
-        onUploadComplete?.(data.documents ?? []);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setUploadError(message);
     } finally {
       setIsUploading(false);
+      onUploadStateChange?.(false);
       setUploadProgress(null);
       setProcessingSummary(null);
     }
@@ -254,6 +263,7 @@ export default function FileUploadZone({
 
     try {
       setIsUploading(true);
+      onUploadStateChange?.(true);
       setUploadProgress(null);
       setUploadError("");
       const res = await fetch("/api/uploads", {
@@ -266,7 +276,6 @@ export default function FileUploadZone({
         setUploadError("No new content was added (possible duplicate).");
       } else {
         setRichText("");
-        onUploadComplete?.(data.documents ?? []);
       }
       onFilesAdded(data.documents ?? []);
     } catch (error) {
@@ -274,6 +283,7 @@ export default function FileUploadZone({
       setUploadError(message);
     } finally {
       setIsUploading(false);
+      onUploadStateChange?.(false);
     }
   }
 

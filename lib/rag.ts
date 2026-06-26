@@ -7,7 +7,12 @@ import { promisify } from "node:util";
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { OpenAIEmbeddings } from "@langchain/openai";
-import { CloudClient, type Collection, type Metadata } from "chromadb";
+import {
+  ChromaClient,
+  CloudClient,
+  type Collection,
+  type Metadata,
+} from "chromadb";
 import { getBotById, removeDocumentObjects } from "@/lib/supabase-store";
 import { BotDocument, ChatCitation } from "@/lib/types";
 
@@ -16,10 +21,12 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const CHROMA_API_KEY = process.env.CHROMA_API_KEY?.trim();
 const CHROMA_TENANT = process.env.CHROMA_TENANT?.trim();
 const CHROMA_DATABASE = process.env.CHROMA_DATABASE?.trim();
-const CHROMA_URL = process.env.CHROMA_URL?.trim() || "https://api.trychroma.com";
+const CHROMA_URL =
+  process.env.CHROMA_URL?.trim() ||
+  (CHROMA_API_KEY ? "https://api.trychroma.com" : "http://localhost:8000");
 const CHROMA_COLLECTION = process.env.CHROMA_COLLECTION ?? "dsti_rag_docs";
-let cloudClient: CloudClient | null = null;
-const cloudCollections = new Map<string, Collection>();
+let chromaClient: ChromaClient | null = null;
+const chromaCollections = new Map<string, Collection>();
 const OPENROUTER_DOCUMENT_MODEL =
   process.env.OPENROUTER_DOCUMENT_MODEL ?? "openrouter/free";
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
@@ -653,63 +660,74 @@ function embeddingsModel(): OpenAIEmbeddings {
   });
 }
 
-function parseChromaCloudHostAndPort(urlValue: string): {
+function parseChromaUrl(urlValue: string): {
   host?: string;
   port?: number;
+  ssl?: boolean;
 } {
   try {
     const parsed = new URL(urlValue);
     const host = parsed.hostname || undefined;
     const port = parsed.port ? Number(parsed.port) : undefined;
     if (port !== undefined && Number.isNaN(port)) {
-      return { host };
+      return { host, ssl: parsed.protocol === "https:" };
     }
-    return { host, port };
+    return { host, port, ssl: parsed.protocol === "https:" };
   } catch {
     return {};
   }
 }
 
-function getCloudClient(): CloudClient {
-  if (!CHROMA_API_KEY) {
-    throw new Error("CHROMA_API_KEY is required for Chroma Cloud.");
-  }
-  if (!CHROMA_TENANT) {
-    throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
-  }
-  if (!CHROMA_DATABASE) {
-    throw new Error("CHROMA_DATABASE is required for Chroma Cloud.");
-  }
-  if (cloudClient) return cloudClient;
+function getChromaClient(): ChromaClient {
+  if (chromaClient) return chromaClient;
 
-  const { host, port } = parseChromaCloudHostAndPort(CHROMA_URL);
+  const { host, port, ssl } = parseChromaUrl(CHROMA_URL);
 
-  cloudClient = new CloudClient({
-    apiKey: CHROMA_API_KEY,
+  if (CHROMA_API_KEY) {
+    if (!CHROMA_TENANT) {
+      throw new Error("CHROMA_TENANT is required for Chroma Cloud.");
+    }
+    if (!CHROMA_DATABASE) {
+      throw new Error("CHROMA_DATABASE is required for Chroma Cloud.");
+    }
+
+    chromaClient = new CloudClient({
+      apiKey: CHROMA_API_KEY,
+      ...(host ? { host } : {}),
+      ...(port ? { port } : {}),
+      tenant: CHROMA_TENANT,
+      database: CHROMA_DATABASE,
+    });
+
+    return chromaClient;
+  }
+
+  chromaClient = new ChromaClient({
     ...(host ? { host } : {}),
     ...(port ? { port } : {}),
-    tenant: CHROMA_TENANT,
-    database: CHROMA_DATABASE,
+    ...(typeof ssl === "boolean" ? { ssl } : {}),
+    ...(CHROMA_TENANT ? { tenant: CHROMA_TENANT } : {}),
+    ...(CHROMA_DATABASE ? { database: CHROMA_DATABASE } : {}),
   });
 
-  return cloudClient;
+  return chromaClient;
 }
 
-function cloudCollectionName(botId: string): string {
+function chromaCollectionName(botId: string): string {
   const safeBotId = botId.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   return `${CHROMA_COLLECTION}__${safeBotId}`.slice(0, 63);
 }
 
-async function getCloudCollection(botId: string): Promise<Collection> {
-  const name = cloudCollectionName(botId);
-  const cached = cloudCollections.get(name);
+async function getChromaCollection(botId: string): Promise<Collection> {
+  const name = chromaCollectionName(botId);
+  const cached = chromaCollections.get(name);
   if (cached) return cached;
 
-  const client = getCloudClient();
+  const client = getChromaClient();
   const collection = await client.getOrCreateCollection({
     name,
   });
-  cloudCollections.set(name, collection);
+  chromaCollections.set(name, collection);
   return collection;
 }
 
@@ -904,7 +922,9 @@ export async function indexDocumentChunks(params: {
     toChromaMetadata(chunk.metadata as Record<string, unknown>),
   );
 
-  const collection = await getCloudCollection(botId);
+  const collection = await getChromaCollection(botId);
+
+  await collection.delete({ where: { botId, docId } });
 
   // Try external embeddings first, fall back to Chroma's built-in embedding
   const embeddings = await generateEmbeddings(documents);
@@ -917,7 +937,7 @@ export async function indexDocumentChunks(params: {
       embeddings,
     });
   } else {
-    // Let Chroma Cloud generate embeddings using its default embedding function
+    // Let Chroma generate embeddings using its configured default embedding function.
     await collection.upsert({
       ids,
       documents,
@@ -925,10 +945,10 @@ export async function indexDocumentChunks(params: {
     });
   }
 
-  const verify = await collection.get({ ids, include: [] });
+  const verify = await collection.get({ ids });
   if ((verify.ids?.length ?? 0) !== ids.length) {
     throw new Error(
-      `Chroma Cloud verification failed: expected ${ids.length} chunks, found ${verify.ids?.length ?? 0}.`,
+      `Chroma verification failed: expected ${ids.length} chunks, found ${verify.ids?.length ?? 0}.`,
     );
   }
 }
@@ -937,7 +957,7 @@ export async function removeDocumentChunks(
   botId: string,
   docId: string,
 ): Promise<void> {
-  const collection = await getCloudCollection(botId);
+  const collection = await getChromaCollection(botId);
   await collection.delete({ where: { botId, docId } });
 }
 
@@ -963,7 +983,7 @@ export async function removeBotKnowledgeByDocuments(
 
   const vectorCleanup = Promise.resolve()
     .then(async () => {
-      const collection = await getCloudCollection(botId);
+      const collection = await getChromaCollection(botId);
       await collection.delete({ where: { botId } });
     })
     .catch((error) => {
@@ -989,7 +1009,7 @@ async function generateQueryEmbedding(query: string): Promise<number[] | null> {
 
 export async function retrieveContext(botId: string, query: string) {
   try {
-    const collection = await getCloudCollection(botId);
+    const collection = await getChromaCollection(botId);
 
     // Try external embedding first, fall back to Chroma's queryTexts
     const queryEmbedding = await generateQueryEmbedding(query);

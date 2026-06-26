@@ -46,7 +46,13 @@ export default function NewBotPage() {
   // Step 2 state — tracks all files across "processing" → "ready" updates
   const [uploadedFiles, setUploadedFiles] = useState<BotDocument[]>([]);
   const [docsError, setDocsError] = useState("");
+  const [isUploadingDocuments, setIsUploadingDocuments] = useState(false);
   const hasReadyDocuments = uploadedFiles.some((file) => file.status === "ready");
+  const hasProcessingDocuments = uploadedFiles.some(
+    (file) => file.status === "processing",
+  );
+  const canContinueFromDocuments =
+    hasReadyDocuments && !isUploadingDocuments && !hasProcessingDocuments;
 
   useEffect(() => {
     let cancelled = false;
@@ -122,7 +128,15 @@ export default function NewBotPage() {
   }, [createdBot, isRestoring, step]);
 
   useEffect(() => {
-    if (step !== 1 || !createdBot || !hasReadyDocuments) return;
+    if (
+      step !== 1 ||
+      !createdBot ||
+      !hasReadyDocuments ||
+      isUploadingDocuments ||
+      hasProcessingDocuments
+    ) {
+      return;
+    }
 
     const readyDocs = uploadedFiles.filter((file) => file.status === "ready");
     if (readyDocs.length === 0) return;
@@ -140,7 +154,14 @@ export default function NewBotPage() {
       body: JSON.stringify({ documents: readyDocs, status: "active" }),
     }).catch(() => {});
     setStep(2);
-  }, [createdBot, hasReadyDocuments, step, uploadedFiles]);
+  }, [
+    createdBot,
+    hasProcessingDocuments,
+    hasReadyDocuments,
+    isUploadingDocuments,
+    step,
+    uploadedFiles,
+  ]);
 
   async function handleStep1Continue() {
     if (!name.trim()) {
@@ -208,6 +229,10 @@ export default function NewBotPage() {
   }
 
   function handleStep2Continue() {
+    if (isUploadingDocuments || hasProcessingDocuments) {
+      setDocsError("Wait for upload and indexing to finish before continuing.");
+      return;
+    }
     const readyDocs = uploadedFiles.filter((f) => f.status === "ready");
     if (readyDocs.length === 0) {
       setDocsError("At least one document is required before continuing.");
@@ -228,10 +253,6 @@ export default function NewBotPage() {
       }).catch(() => {});
     }
     setStep(2);
-  }
-
-  function handleUploadComplete(incoming: BotDocument[]) {
-    setUploadedFiles((current) => mergeIncomingDocuments(current, incoming));
   }
 
   if (isRestoring) {
@@ -401,7 +422,7 @@ export default function NewBotPage() {
                 onFilesAdded={handleFilesAdded}
                 onDeleteDoc={handleDeleteBufferedDoc}
                 allowRichText
-                onUploadComplete={handleUploadComplete}
+                onUploadStateChange={setIsUploadingDocuments}
               />
               {docsError && (
                 <p className="text-[12px] text-red-500 mt-2">{docsError}</p>
@@ -411,9 +432,12 @@ export default function NewBotPage() {
             <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center">
               <button
                 onClick={handleStep2Continue}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-blue-700 sm:w-auto"
+                disabled={!canContinueFromDocuments}
+                className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
-                Continue
+                {isUploadingDocuments || hasProcessingDocuments
+                  ? "Indexing..."
+                  : "Continue"}
               </button>
             </div>
           </div>

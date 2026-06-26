@@ -110,10 +110,11 @@ async function processUploadedDocument(params: {
       });
     } catch (error) {
       status = "failed";
+      document.status = status;
       const details =
         error instanceof Error ? error.message : "Unknown indexing error";
-      console.warn(`Cloud indexing failed for ${document.name}: ${details}`);
-      throw new Error(`Cloud indexing failed for ${document.name}: ${details}`);
+      console.warn(`Chroma indexing failed for ${document.name}: ${details}`);
+      throw new Error(`Chroma indexing failed for ${document.name}: ${details}`);
     }
   }
 
@@ -203,7 +204,7 @@ export async function POST(req: NextRequest) {
         } catch (error) {
           const details =
             error instanceof Error ? error.message : "Unknown indexing error";
-          throw new Error(`Cloud indexing failed for rich text: ${details}`);
+          throw new Error(`Chroma indexing failed for rich text: ${details}`);
         }
       }
     }
@@ -257,6 +258,7 @@ export async function POST(req: NextRequest) {
                 type: "processing",
                 completed: 0,
                 total: uploadJobs.length,
+                documents: processingDocs,
               }),
             );
 
@@ -327,10 +329,10 @@ export async function POST(req: NextRequest) {
                 encodeStreamEvent({
                   type: "error",
                   error: failedDetails
-                    ? `Cloud indexing failed for: ${failedDetails}`
+                    ? `Chroma indexing failed for: ${failedDetails}`
                     : failedNames
-                      ? `Cloud indexing failed for: ${failedNames}`
-                      : "Cloud indexing failed. No document was indexed.",
+                      ? `Chroma indexing failed for: ${failedNames}`
+                      : "Chroma indexing failed. No document was indexed.",
                 }),
               );
               controller.close();
@@ -381,7 +383,7 @@ export async function POST(req: NextRequest) {
       documents.every((document) => document.status !== "ready")
     ) {
       return NextResponse.json(
-        { error: "Cloud indexing failed. No document was indexed." },
+        { error: "Chroma indexing failed. No document was indexed." },
         { status: 500 },
       );
     }
