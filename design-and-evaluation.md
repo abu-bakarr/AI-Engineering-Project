@@ -149,7 +149,7 @@ What is implemented in the repository:
 What still requires environment-backed execution outside this patch:
 
 - final evaluation numbers from a real run
-- optional public deployment on Render/Railway
+- optional public deployment on Render
 - recorded demo video
 
 Those items depend on your API keys, dataset choice, and deployment account rather than additional local code structure.

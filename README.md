@@ -24,7 +24,6 @@ This repository includes the project artifacts requested by the AI Engineering P
 - [evaluation/sample-eval-set.json](evaluation/sample-eval-set.json)
 - [scripts/evaluate-rag.mjs](scripts/evaluate-rag.mjs)
 - [data/sample-corpus](data/sample-corpus)
-- [railway.json](railway.json)
 - [deployed.md](deployed.md)
 
 ## Required Routes
@@ -316,17 +315,24 @@ GitHub Actions is configured in `.github/workflows/ci.yml` and runs on both push
 - `npx tsc --noEmit`
 - `npm run build`
 
-## Railway Deployment
+## Render Deployment
 
-Railway deployment scaffolding is included:
+Render deployment documentation is included in [deployed.md](deployed.md).
 
-- [railway.json](railway.json)
-- [deployed.md](deployed.md)
+Current production URL:
+
+- https://ai-engineering-project-tv92.onrender.com
 
 The recommended production layout is:
 
 1. a `web` service for the Next.js app using the repository `Dockerfile`
-2. a separate `chroma` service with persistent storage
+2. a separate private `chroma` service with persistent storage
+
+Deployment flow:
+
+1. connect the GitHub repository to Render
+2. set the deploy branch to `main`
+3. enable auto deploy on push to `main`
 
 ## Project Structure
 
