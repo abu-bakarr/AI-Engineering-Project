@@ -13,6 +13,11 @@ import { mergeIncomingDocuments } from "@/lib/documents";
 const STEPS = ["Details", "Documents", "Embed code"];
 const DEFAULT_ACCENT_COLOR = "#2563eb";
 
+type StoredNewBotDraft = {
+  step: number;
+  botId: string;
+};
+
 function deriveInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "??";
@@ -50,11 +55,52 @@ export default function NewBotPage() {
     hasReadyDocuments && !isUploadingDocuments && !hasProcessingDocuments;
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      // Always start a fresh bot setup flow when opening the new bot page.
-      window.sessionStorage.removeItem(NEW_BOT_DRAFT_STORAGE_KEY);
+    let cancelled = false;
+
+    async function restoreDraft() {
+      if (typeof window === "undefined") return;
+
+      const raw = window.sessionStorage.getItem(NEW_BOT_DRAFT_STORAGE_KEY);
+      if (!raw) {
+        if (!cancelled) setIsRestoring(false);
+        return;
+      }
+
+      try {
+        const stored = JSON.parse(raw) as StoredNewBotDraft;
+        if (!stored.botId || stored.step < 1) {
+          window.sessionStorage.removeItem(NEW_BOT_DRAFT_STORAGE_KEY);
+          if (!cancelled) setIsRestoring(false);
+          return;
+        }
+
+        const response = await fetch(`/api/bots/${stored.botId}`, {
+          cache: "no-store",
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.bot) {
+          window.sessionStorage.removeItem(NEW_BOT_DRAFT_STORAGE_KEY);
+          if (!cancelled) setIsRestoring(false);
+          return;
+        }
+
+        if (cancelled) return;
+
+        setCreatedBot(data.bot);
+        setUploadedFiles(data.bot.documents ?? []);
+        setStep(Math.min(stored.step, 2));
+      } catch {
+        window.sessionStorage.removeItem(NEW_BOT_DRAFT_STORAGE_KEY);
+      } finally {
+        if (!cancelled) setIsRestoring(false);
+      }
     }
-    setIsRestoring(false);
+
+    void restoreDraft();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -79,7 +125,7 @@ export default function NewBotPage() {
 
     window.sessionStorage.setItem(
       NEW_BOT_DRAFT_STORAGE_KEY,
-      JSON.stringify({ step, botId: createdBot.id }),
+      JSON.stringify({ step, botId: createdBot.id } satisfies StoredNewBotDraft),
     );
   }, [createdBot, isRestoring, step]);
 

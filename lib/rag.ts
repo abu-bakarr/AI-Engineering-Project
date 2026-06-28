@@ -30,6 +30,9 @@ const OPENROUTER_DOCUMENT_MODEL =
 const DOCUMENT_EXTRACTOR_TIMEOUT_MS = Number(
   process.env.DOCUMENT_EXTRACTOR_TIMEOUT_MS ?? "30000",
 );
+const ENABLE_OPENROUTER_DOCUMENT_EXTRACTOR =
+  (process.env.ENABLE_OPENROUTER_DOCUMENT_EXTRACTOR ?? "false").toLowerCase() ===
+  "true";
 const DOCUMENT_OCR_TIMEOUT_MS = Number(
   process.env.DOCUMENT_OCR_TIMEOUT_MS ?? "120000",
 );
@@ -129,6 +132,7 @@ export function extractPrintableText(buffer: Buffer): string {
 function normalizeExtractedText(text: string): string {
   return text
     .replace(/\r/g, "\n")
+    .replace(/\f/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -358,6 +362,16 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string> {
   } finally {
     await parser.destroy();
   }
+}
+
+async function extractPdfWithPdftotext(filePath: string): Promise<string> {
+  return runTextExtractor(process.env.PDFTOTEXT_COMMAND ?? "pdftotext", [
+    "-layout",
+    "-enc",
+    "UTF-8",
+    filePath,
+    "-",
+  ]);
 }
 
 async function extractWithMarkItDown(filePath: string): Promise<string> {
@@ -613,6 +627,12 @@ export async function extractDocumentText(params: {
   const attempts: Array<{ label: string; run: () => Promise<string> }> = [];
 
   if (extension === "pdf") {
+    if (commandAvailable(process.env.PDFTOTEXT_COMMAND ?? "pdftotext")) {
+      attempts.push({
+        label: "pdftotext",
+        run: () => extractPdfWithPdftotext(filePath),
+      });
+    }
     attempts.push({
       label: "pdf-parse",
       run: () => extractWithPdfParse(buffer),
@@ -621,10 +641,12 @@ export async function extractDocumentText(params: {
       label: "PaddleOCR PDF image extractor",
       run: () => extractPdfWithPaddleOcr(filePath),
     });
-    attempts.push({
-      label: "OpenRouter PDF extractor",
-      run: () => extractPdfWithOpenRouter(buffer, fileName),
-    });
+    if (ENABLE_OPENROUTER_DOCUMENT_EXTRACTOR) {
+      attempts.push({
+        label: "OpenRouter PDF extractor",
+        run: () => extractPdfWithOpenRouter(buffer, fileName),
+      });
+    }
   }
 
   if (extension === "docx") {

@@ -39,7 +39,7 @@ export default function BotDocsPage() {
 
   function handleFilesAdded(incoming: BotDocument[]) {
     setUploadBuffer((prev) => mergeIncomingDocuments(prev, incoming));
-    if (incoming.some((file) => file.status === "ready")) {
+    if (incoming.some((file) => file.status !== "processing")) {
       loadBot();
     }
   }
@@ -66,7 +66,7 @@ export default function BotDocsPage() {
   const allDocs = [
     ...botDocuments,
     ...uploadBuffer.filter(
-      (u) => !botDocuments.some((d) => d.id === u.id) && u.status === "processing"
+      (u) => !botDocuments.some((d) => d.id === u.id)
     ),
   ];
 
@@ -289,9 +289,13 @@ export default function BotDocsPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-              {selectedDoc.status !== "ready" ? (
+              {selectedDoc.status === "processing" ? (
                 <p className="text-[13px] text-gray-500">
                   This document is still processing. Preview becomes available when indexing completes.
+                </p>
+              ) : selectedDoc.status === "failed" ? (
+                <p className="text-[13px] text-red-500">
+                  Text extraction or indexing failed for this document.
                 </p>
               ) : !selectedDoc.content?.trim() ? (
                 <p className="text-[13px] text-gray-500">
