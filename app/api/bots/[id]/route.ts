@@ -4,7 +4,6 @@ import { BotDocument } from "@/lib/types";
 import {
   deleteBot,
   getBotById,
-  removeDocumentObjects,
   removeDocumentObject,
   replaceBotDocuments,
   updateBot,
@@ -126,14 +125,8 @@ export async function DELETE(
     }
 
     let cleanupWarning: string | null = null;
-    const storagePaths = (botToDelete.documents ?? [])
-      .map((document) => document.storedName)
-      .filter((value): value is string => Boolean(value));
 
     try {
-      if (storagePaths.length > 0) {
-        await removeDocumentObjects(storagePaths);
-      }
       await removeBotKnowledgeByDocuments(id, botToDelete.documents ?? []);
     } catch (error) {
       cleanupWarning =
