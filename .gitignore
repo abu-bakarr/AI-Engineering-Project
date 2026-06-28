@@ -3,6 +3,7 @@ node_modules/
 .env.local
 .env
 *.log
+lib/generated/prisma/
 
 # SQLite database files (ChromaDB storage)
 *.sqlite3

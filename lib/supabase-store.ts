@@ -1,35 +1,10 @@
+import prisma from "@/lib/prisma";
+import type {
+  Bot as PrismaBot,
+  BotDocument as PrismaBotDocument,
+} from "@/lib/generated/prisma/client";
 import { Bot, BotDocument } from "./types";
 
-type BotRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  accent_color: string;
-  logo_data_url: string | null;
-  initials: string;
-  created_at: string;
-  status: "active" | "draft";
-  total_queries: number;
-};
-
-type BotDocumentRow = {
-  id: string;
-  bot_id: string;
-  name: string;
-  size: number;
-  type: string;
-  uploaded_at: string;
-  status: "processing" | "ready" | "failed";
-  hash: string | null;
-  stored_name: string | null;
-  content: string | null;
-  source: "upload" | "rich-text" | null;
-};
-
-const BOT_COLUMNS =
-  "id,name,description,accent_color,logo_data_url,initials,created_at,status,total_queries";
-const DOCUMENT_COLUMNS =
-  "id,bot_id,name,size,type,uploaded_at,status,hash,stored_name,content,source";
 const DEFAULT_STORAGE_BUCKET = "bot-documents";
 
 let storageBucketReady = false;
@@ -43,7 +18,9 @@ function normalizeSupabaseUrl(value: string): string {
   }
 
   if (parsed.protocol === "postgres:" || parsed.protocol === "postgresql:") {
-    const projectRef = parsed.hostname.replace(/^db\./, "").replace(/\.supabase\.co$/, "");
+    const projectRef = parsed.hostname
+      .replace(/^db\./, "")
+      .replace(/\.supabase\.co$/, "");
     if (!projectRef || projectRef === parsed.hostname) {
       throw new Error(
         "SUPABASE_URL is a database connection string. Set it to your project URL, for example https://your-project-ref.supabase.co.",
@@ -58,7 +35,9 @@ function normalizeSupabaseUrl(value: string): string {
   }
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("SUPABASE_URL must use https://, for example https://your-project-ref.supabase.co.");
+    throw new Error(
+      "SUPABASE_URL must use https://, for example https://your-project-ref.supabase.co.",
+    );
   }
 
   return parsed.toString().replace(/\/+$/, "");
@@ -84,48 +63,6 @@ function storageBucketName(): string {
 
 function encodeStoragePath(value: string): string {
   return value.split("/").map(encodeURIComponent).join("/");
-}
-
-async function supabaseRequest<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  const { url, serviceRoleKey } = supabaseConfig();
-  const headers = new Headers(init.headers);
-  headers.set("apikey", serviceRoleKey);
-  headers.set("Authorization", `Bearer ${serviceRoleKey}`);
-  headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const details = await response.text();
-    throw new Error(
-      `Supabase request failed (${response.status} ${response.statusText}): ${details}`,
-    );
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  const text = await response.text();
-  if (!text.trim()) {
-    return undefined as T;
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error("Supabase returned an invalid JSON response.");
-  }
 }
 
 async function supabaseStorageRequest<T>(
@@ -190,7 +127,9 @@ export function documentStoragePath(params: {
   fileName: string;
 }): string {
   const extension = params.fileName.split(".").pop()?.toLowerCase();
-  const safeExtension = extension ? `.${extension.replace(/[^a-z0-9]/g, "")}` : "";
+  const safeExtension = extension
+    ? `.${extension.replace(/[^a-z0-9]/g, "")}`
+    : "";
   return `${params.botId}/${params.docId}${safeExtension}`;
 }
 
@@ -222,10 +161,13 @@ export async function removeDocumentObject(path: string): Promise<void> {
   if (!path) return;
   await ensureDocumentStorageBucket();
 
-  await supabaseStorageRequest(`object/${encodeURIComponent(storageBucketName())}`, {
-    method: "DELETE",
-    body: JSON.stringify({ prefixes: [path] }),
-  });
+  await supabaseStorageRequest(
+    `object/${encodeURIComponent(storageBucketName())}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ prefixes: [path] }),
+    },
+  );
 }
 
 export async function removeDocumentObjects(paths: string[]): Promise<void> {
@@ -233,130 +175,162 @@ export async function removeDocumentObjects(paths: string[]): Promise<void> {
   if (uniquePaths.length === 0) return;
   await ensureDocumentStorageBucket();
 
-  await supabaseStorageRequest(`object/${encodeURIComponent(storageBucketName())}`, {
-    method: "DELETE",
-    body: JSON.stringify({ prefixes: uniquePaths }),
-  });
+  await supabaseStorageRequest(
+    `object/${encodeURIComponent(storageBucketName())}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ prefixes: uniquePaths }),
+    },
+  );
 }
 
-function botFromRow(row: BotRow, documents: BotDocument[] = []): Bot {
+function botFromRecord(row: PrismaBot, documents: BotDocument[] = []): Bot {
   return {
     id: row.id,
     name: row.name,
     description: row.description ?? "",
-    accentColor: row.accent_color,
-    logoDataUrl: row.logo_data_url ?? undefined,
+    accentColor: row.accentColor,
+    logoDataUrl: row.logoDataUrl ?? undefined,
     initials: row.initials,
-    createdAt: row.created_at,
-    status: row.status,
-    totalQueries: row.total_queries ?? 0,
+    createdAt: row.createdAt.toISOString(),
+    status: row.status === "active" ? "active" : "draft",
+    totalQueries: row.totalQueries ?? 0,
     documents,
   };
 }
 
-function documentFromRow(row: BotDocumentRow): BotDocument {
+function documentFromRecord(row: PrismaBotDocument): BotDocument {
   return {
     id: row.id,
     name: row.name,
     size: row.size,
     type: row.type,
-    uploadedAt: row.uploaded_at,
-    status: row.status,
+    uploadedAt: row.uploadedAt.toISOString(),
+    status:
+      row.status === "processing" || row.status === "failed"
+        ? row.status
+        : "ready",
     hash: row.hash ?? undefined,
-    storedName: row.stored_name ?? undefined,
+    storedName: row.storedName ?? undefined,
     content: row.content ?? undefined,
-    source: row.source ?? undefined,
+    source:
+      row.source === "upload" || row.source === "rich-text"
+        ? row.source
+        : undefined,
   };
 }
 
-function botToRow(bot: Bot): BotRow {
+function botCreateData(bot: Bot) {
   return {
     id: bot.id,
     name: bot.name,
     description: bot.description || null,
-    accent_color: bot.accentColor,
-    logo_data_url: bot.logoDataUrl ?? null,
+    accentColor: bot.accentColor,
+    logoDataUrl: bot.logoDataUrl ?? null,
     initials: bot.initials,
-    created_at: bot.createdAt,
+    createdAt: bot.createdAt,
     status: bot.status,
-    total_queries: bot.totalQueries ?? 0,
+    totalQueries: bot.totalQueries ?? 0,
   };
 }
 
-function documentToRow(botId: string, document: BotDocument): BotDocumentRow {
+function documentCreateData(botId: string, document: BotDocument) {
   return {
     id: document.id,
-    bot_id: botId,
+    botId,
     name: document.name,
     size: document.size,
     type: document.type,
-    uploaded_at: document.uploadedAt,
+    uploadedAt: document.uploadedAt,
     status: document.status,
     hash: document.hash ?? null,
-    stored_name: document.storedName ?? null,
+    storedName: document.storedName ?? null,
     content: document.content ?? null,
     source: document.source ?? null,
   };
 }
 
-function botUpdatesToRow(updates: Partial<Bot>): Partial<BotRow> {
-  const row: Partial<BotRow> = {};
+function botUpdateData(updates: Partial<Bot>) {
+  const row: Partial<ReturnType<typeof botCreateData>> = {};
   if (updates.name !== undefined) row.name = updates.name;
-  if (updates.description !== undefined) row.description = updates.description || null;
-  if (updates.accentColor !== undefined) row.accent_color = updates.accentColor;
-  if (updates.logoDataUrl !== undefined) row.logo_data_url = updates.logoDataUrl ?? null;
+  if (updates.description !== undefined) {
+    row.description = updates.description || null;
+  }
+  if (updates.accentColor !== undefined) row.accentColor = updates.accentColor;
+  if (updates.logoDataUrl !== undefined) {
+    row.logoDataUrl = updates.logoDataUrl ?? null;
+  }
   if (updates.initials !== undefined) row.initials = updates.initials;
-  if (updates.createdAt !== undefined) row.created_at = updates.createdAt;
+  if (updates.createdAt !== undefined) row.createdAt = updates.createdAt;
   if (updates.status !== undefined) row.status = updates.status;
-  if (updates.totalQueries !== undefined) row.total_queries = updates.totalQueries;
+  if (updates.totalQueries !== undefined) row.totalQueries = updates.totalQueries;
   return row;
 }
 
-async function listDocumentRows(botId: string): Promise<BotDocumentRow[]> {
-  return supabaseRequest<BotDocumentRow[]>(
-    `bot_documents?select=${DOCUMENT_COLUMNS}&bot_id=eq.${encodeURIComponent(botId)}&order=uploaded_at.desc`,
-  );
+async function listDocumentRecords(botId: string): Promise<PrismaBotDocument[]> {
+  return prisma.botDocument.findMany({
+    where: { botId },
+    orderBy: { uploadedAt: "desc" },
+  });
 }
 
 export async function getBots(): Promise<Bot[]> {
-  const [botRows, documentRows] = await Promise.all([
-    supabaseRequest<BotRow[]>(`bots?select=${BOT_COLUMNS}&order=created_at.desc`),
-    supabaseRequest<BotDocumentRow[]>(`bot_documents?select=${DOCUMENT_COLUMNS}&order=uploaded_at.desc`),
-  ]);
+  const bots = await prisma.bot.findMany({
+    orderBy: { createdAt: "desc" },
+    include: {
+      documents: {
+        orderBy: { uploadedAt: "desc" },
+      },
+    },
+  });
 
-  const documentsByBot = new Map<string, BotDocument[]>();
-  for (const row of documentRows) {
-    const documents = documentsByBot.get(row.bot_id) ?? [];
-    documents.push(documentFromRow(row));
-    documentsByBot.set(row.bot_id, documents);
-  }
-
-  return botRows.map((row) => botFromRow(row, documentsByBot.get(row.id) ?? []));
+  return bots.map((bot) =>
+    botFromRecord(bot, bot.documents.map(documentFromRecord)),
+  );
 }
 
 export async function getBotById(id: string): Promise<Bot | null> {
-  const rows = await supabaseRequest<BotRow[]>(
-    `bots?select=${BOT_COLUMNS}&id=eq.${encodeURIComponent(id)}&limit=1`,
-  );
-  const row = rows[0];
-  if (!row) return null;
+  const bot = await prisma.bot.findUnique({
+    where: { id },
+    include: {
+      documents: {
+        orderBy: { uploadedAt: "desc" },
+      },
+    },
+  });
 
-  const documents = (await listDocumentRows(id)).map(documentFromRow);
-  return botFromRow(row, documents);
+  if (!bot) return null;
+
+  return botFromRecord(bot, bot.documents.map(documentFromRecord));
 }
 
 export async function createBot(bot: Bot): Promise<Bot> {
-  const rows = await supabaseRequest<BotRow[]>("bots", {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify(botToRow(bot)),
+  const created = await prisma.bot.create({
+    data: {
+      ...botCreateData(bot),
+      documents: {
+        create: bot.documents.map((document) => ({
+          id: document.id,
+          name: document.name,
+          size: document.size,
+          type: document.type,
+          uploadedAt: document.uploadedAt,
+          status: document.status,
+          hash: document.hash ?? null,
+          storedName: document.storedName ?? null,
+          content: document.content ?? null,
+          source: document.source ?? null,
+        })),
+      },
+    },
+    include: {
+      documents: {
+        orderBy: { uploadedAt: "desc" },
+      },
+    },
   });
 
-  if (bot.documents.length > 0) {
-    await appendBotDocuments(bot.id, bot.documents);
-  }
-
-  return botFromRow(rows[0] ?? botToRow(bot), bot.documents);
+  return botFromRecord(created, created.documents.map(documentFromRecord));
 }
 
 export async function appendBotDocuments(
@@ -365,29 +339,33 @@ export async function appendBotDocuments(
 ): Promise<void> {
   if (documents.length === 0) return;
 
-  await supabaseRequest("bot_documents?on_conflict=id", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify(documents.map((document) => documentToRow(botId, document))),
-  });
+  await prisma.$transaction(
+    documents.map((document) =>
+      prisma.botDocument.upsert({
+        where: { id: document.id },
+        create: documentCreateData(botId, document),
+        update: documentCreateData(botId, document),
+      }),
+    ),
+  );
 }
 
 export async function replaceBotDocuments(
   botId: string,
   documents: BotDocument[],
 ): Promise<BotDocument[]> {
-  const existing = (await listDocumentRows(botId)).map(documentFromRow);
+  const existing = (await listDocumentRecords(botId)).map(documentFromRecord);
   const nextIds = new Set(documents.map((document) => document.id));
   const removed = existing.filter((document) => !nextIds.has(document.id));
 
-  await Promise.all(
-    removed.map((document) =>
-      supabaseRequest(
-        `bot_documents?id=eq.${encodeURIComponent(document.id)}&bot_id=eq.${encodeURIComponent(botId)}`,
-        { method: "DELETE" },
-      ),
-    ),
-  );
+  if (removed.length > 0) {
+    await prisma.botDocument.deleteMany({
+      where: {
+        botId,
+        id: { in: removed.map((document) => document.id) },
+      },
+    });
+  }
 
   if (documents.length > 0) {
     await appendBotDocuments(botId, documents);
@@ -400,17 +378,13 @@ export async function updateBot(
   id: string,
   updates: Partial<Bot>,
 ): Promise<Bot | null> {
-  const rowUpdates = botUpdatesToRow(updates);
+  const rowUpdates = botUpdateData(updates);
 
   if (Object.keys(rowUpdates).length > 0) {
-    await supabaseRequest(
-      `bots?id=eq.${encodeURIComponent(id)}`,
-      {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify(rowUpdates),
-      },
-    );
+    await prisma.bot.updateMany({
+      where: { id },
+      data: rowUpdates,
+    });
   }
 
   if (Array.isArray(updates.documents)) {
@@ -421,18 +395,18 @@ export async function updateBot(
 }
 
 export async function deleteBot(id: string): Promise<void> {
-  await supabaseRequest(`bots?id=eq.${encodeURIComponent(id)}`, {
-    method: "DELETE",
+  await prisma.bot.deleteMany({
+    where: { id },
   });
 }
 
 export async function incrementBotQueries(id: string): Promise<void> {
-  const bot = await getBotById(id);
-  if (!bot) return;
-
-  await supabaseRequest(`bots?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ total_queries: (bot.totalQueries ?? 0) + 1 }),
+  await prisma.bot.updateMany({
+    where: { id },
+    data: {
+      totalQueries: {
+        increment: 1,
+      },
+    },
   });
 }

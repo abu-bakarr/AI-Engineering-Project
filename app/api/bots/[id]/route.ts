@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { databaseErrorResponse } from "@/lib/database-error";
 import { BotDocument } from "@/lib/types";
 import {
   deleteBot,
   getBotById,
+  removeDocumentObjects,
   removeDocumentObject,
   replaceBotDocuments,
   updateBot,
 } from "@/lib/supabase-store";
+import { removeBotKnowledgeByDocuments, removeDocumentChunks } from "@/lib/rag";
 
 const DOCUMENT_PROCESSING_TTL_MS = Number(
   process.env.DOCUMENT_PROCESSING_TTL_MS ?? "120000",
@@ -33,110 +36,121 @@ export async function GET(
   _: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const bot = await getBotById(id);
-  if (!bot) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const { id } = await params;
+    const bot = await getBotById(id);
+    if (!bot) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const staleIds = new Set(
-    bot.documents
-      .filter((document) => isStaleProcessingDocument(document as BotDocument))
-      .map((document) => document.id),
-  );
-
-  if (staleIds.size > 0) {
-    const recoveredDocuments = bot.documents.map((document) =>
-      staleIds.has(document.id)
-        ? {
-            ...document,
-            status: "failed" as const,
-            content: document.content ?? "",
-          }
-        : document,
+    const staleIds = new Set(
+      bot.documents
+        .filter((document) => isStaleProcessingDocument(document as BotDocument))
+        .map((document) => document.id),
     );
 
-    await replaceBotDocuments(id, recoveredDocuments);
-    bot.documents = recoveredDocuments;
-  }
+    if (staleIds.size > 0) {
+      const recoveredDocuments = bot.documents.map((document) =>
+        staleIds.has(document.id)
+          ? {
+              ...document,
+              status: "failed" as const,
+              content: document.content ?? "",
+            }
+          : document,
+      );
 
-  return NextResponse.json({ bot });
+      await replaceBotDocuments(id, recoveredDocuments);
+      bot.documents = recoveredDocuments;
+    }
+
+    return NextResponse.json({ bot });
+  } catch (error) {
+    const response = databaseErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
+  }
 }
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const updates = await req.json();
-  const currentBot = await getBotById(id);
-  if (!currentBot)
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  try {
+    const { id } = await params;
+    const updates = await req.json();
+    const currentBot = await getBotById(id);
+    if (!currentBot)
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (Array.isArray(updates.documents)) {
-    const { removeDocumentChunks } = await import("@/lib/rag");
-    const currentDocuments = currentBot.documents as BotDocument[];
-    const existingIds = new Set(currentDocuments.map((d) => d.id));
-    const nextIds = new Set(
-      (updates.documents as BotDocument[]).map((d) => d.id),
-    );
-    const removedIds = Array.from(existingIds).filter(
-      (docId) => !nextIds.has(docId),
-    );
-    await Promise.all(
-      removedIds.map(async (docId) => {
-        try {
-          const doc = currentDocuments.find((item) => item.id === docId);
-          if (doc?.storedName) {
-            await removeDocumentObject(doc.storedName);
+    if (Array.isArray(updates.documents)) {
+      const currentDocuments = currentBot.documents as BotDocument[];
+      const existingIds = new Set(currentDocuments.map((d) => d.id));
+      const nextIds = new Set(
+        (updates.documents as BotDocument[]).map((d) => d.id),
+      );
+      const removedIds = Array.from(existingIds).filter(
+        (docId) => !nextIds.has(docId),
+      );
+      await Promise.all(
+        removedIds.map(async (docId) => {
+          try {
+            const doc = currentDocuments.find((item) => item.id === docId);
+            if (doc?.storedName) {
+              await removeDocumentObject(doc.storedName);
+            }
+            await removeDocumentChunks(id, docId);
+          } catch {
+            // Keep bot metadata updates resilient even if vector cleanup fails.
           }
-          await removeDocumentChunks(id, docId);
-        } catch {
-          // Keep bot metadata updates resilient even if vector cleanup fails.
-        }
-      }),
-    );
-    await replaceBotDocuments(id, updates.documents as BotDocument[]);
-  }
+        }),
+      );
+      await replaceBotDocuments(id, updates.documents as BotDocument[]);
+    }
 
-  const { documents: _documents, ...botUpdates } = updates;
-  const bot = await updateBot(id, botUpdates);
-  return NextResponse.json({ bot });
+    const { documents: _documents, ...botUpdates } = updates;
+    const bot = await updateBot(id, botUpdates);
+    return NextResponse.json({ bot });
+  } catch (error) {
+    const response = databaseErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
+  }
 }
 
 export async function DELETE(
   _: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await params;
-  const botToDelete = await getBotById(id);
-  if (!botToDelete) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
   try {
-    const { removeBotKnowledgeByDocuments } = await import("@/lib/rag");
-    await removeBotKnowledgeByDocuments(id, botToDelete.documents ?? [], {
-      strict: true,
+    const { id } = await params;
+    const botToDelete = await getBotById(id);
+    if (!botToDelete) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    let cleanupWarning: string | null = null;
+    const storagePaths = (botToDelete.documents ?? [])
+      .map((document) => document.storedName)
+      .filter((value): value is string => Boolean(value));
+
+    try {
+      if (storagePaths.length > 0) {
+        await removeDocumentObjects(storagePaths);
+      }
+      await removeBotKnowledgeByDocuments(id, botToDelete.documents ?? []);
+    } catch (error) {
+      cleanupWarning =
+        error instanceof Error
+          ? error.message
+          : "Failed to fully clean bot artifacts.";
+    }
+
+    await deleteBot(id);
+
+    return NextResponse.json({
+      ok: true,
+      deletedDocuments: botToDelete.documents?.length ?? 0,
+      cleanupWarning,
     });
   } catch (error) {
-    const details =
-      error instanceof Error
-        ? error.message
-        : "Failed to fully clean bot artifacts.";
-    return NextResponse.json(
-      {
-        error:
-          "Bot cleanup failed. No records were deleted so you can safely retry.",
-        details,
-      },
-      { status: 500 },
-    );
+    const response = databaseErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
   }
-
-  await deleteBot(id);
-
-  return NextResponse.json({
-    ok: true,
-    deletedDocuments: botToDelete.documents?.length ?? 0,
-    cleanupWarning: null,
-  });
 }

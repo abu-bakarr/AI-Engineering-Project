@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Bot {
+  id           String        @id @db.Text
+  name         String        @db.Text
+  description  String?       @db.Text
+  accentColor  String        @default("#2563eb") @map("accent_color") @db.Text
+  logoDataUrl  String?       @map("logo_data_url") @db.Text
+  initials     String        @db.Text
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  status       String        @default("draft") @db.Text
+  totalQueries Int           @default(0) @map("total_queries")
+  documents    BotDocument[]
+
+  @@index([createdAt(sort: Desc)], map: "bots_created_at_idx")
+  @@map("bots")
+}
+
+model BotDocument {
+  id         String   @id @db.Text
+  botId      String   @map("bot_id") @db.Text
+  bot        Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  name       String   @db.Text
+  size       Int      @default(0)
+  type       String   @db.Text
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+  status     String   @default("ready") @db.Text
+  hash       String?  @db.Text
+  storedName String?  @map("stored_name") @db.Text
+  content    String?  @db.Text
+  source     String?  @db.Text
+
+  @@index([botId], map: "bot_documents_bot_id_idx")
+  @@index([hash], map: "bot_documents_hash_idx")
+  @@map("bot_documents")
+}

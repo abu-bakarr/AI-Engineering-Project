@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { databaseErrorResponse } from "@/lib/database-error";
 import { Bot } from "@/lib/types";
 import { createBot, getBots } from "@/lib/supabase-store";
 
@@ -10,32 +11,42 @@ function deriveInitials(name: string): string {
 }
 
 export async function GET() {
-  const bots = await getBots();
-  return NextResponse.json({ bots });
+  try {
+    const bots = await getBots();
+    return NextResponse.json({ bots });
+  } catch (error) {
+    const response = databaseErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const payload = (await req.json()) as Partial<Bot>;
-  const id = payload.id?.trim();
-  const name = payload.name?.trim();
+  try {
+    const payload = (await req.json()) as Partial<Bot>;
+    const id = payload.id?.trim();
+    const name = payload.name?.trim();
 
-  if (!name || !id) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    if (!name || !id) {
+      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    }
+
+    const botToCreate: Bot = {
+      id,
+      name,
+      description: payload.description?.trim() ?? "",
+      accentColor: payload.accentColor ?? "#2563eb",
+      logoDataUrl: payload.logoDataUrl,
+      initials: payload.initials?.trim() || deriveInitials(name),
+      createdAt: new Date().toISOString(),
+      documents: [],
+      status: "draft",
+      totalQueries: 0,
+    };
+
+    const bot = await createBot(botToCreate);
+    return NextResponse.json({ bot });
+  } catch (error) {
+    const response = databaseErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
   }
-
-  const botToCreate: Bot = {
-    id,
-    name,
-    description: payload.description?.trim() ?? "",
-    accentColor: payload.accentColor ?? "#2563eb",
-    logoDataUrl: payload.logoDataUrl,
-    initials: payload.initials?.trim() || deriveInitials(name),
-    createdAt: new Date().toISOString(),
-    documents: [],
-    status: "draft",
-    totalQueries: 0,
-  };
-
-  const bot = await createBot(botToCreate);
-  return NextResponse.json({ bot });
 }
