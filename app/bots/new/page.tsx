@@ -39,6 +39,9 @@ export default function NewBotPage() {
   const [colorError, setColorError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [companyId, setCompanyId] = useState("");
 
   // Created bot
   const [createdBot, setCreatedBot] = useState<Bot | null>(null);
@@ -101,6 +104,23 @@ export default function NewBotPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    async function loadCompanyOptions() {
+      const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+      const sessionData = await sessionResponse.json().catch(() => null);
+      if (sessionData?.session?.role !== "super_admin") return;
+
+      setIsSuperAdmin(true);
+      const companiesResponse = await fetch("/api/companies", { cache: "no-store" });
+      const companiesData = await companiesResponse.json().catch(() => null);
+      const options = companiesData?.companies ?? [];
+      setCompanies(options);
+      setCompanyId((current) => current || options[0]?.id || "");
+    }
+
+    void loadCompanyOptions();
   }, []);
 
   useEffect(() => {
@@ -174,12 +194,17 @@ export default function NewBotPage() {
       setColorError("Use a valid hex color, for example #2563eb.");
       return;
     }
+    if (isSuperAdmin && !companyId) {
+      setSubmitError("Choose a company for this bot.");
+      return;
+    }
     setColorError("");
     setNameError("");
     setSubmitError("");
 
     const bot: Bot = {
       id: crypto.randomUUID(),
+      companyId,
       name: name.trim(),
       description: description.trim(),
       accentColor,
@@ -259,7 +284,7 @@ export default function NewBotPage() {
 
   if (isRestoring) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8" aria-busy="true">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8" aria-busy="true">
         <div className="mb-2">
           <button
             onClick={() => router.push("/bots")}
@@ -284,7 +309,7 @@ export default function NewBotPage() {
 
   return (
     <>
-      <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
         <div className="mb-2">
           <button
             onClick={() => router.push("/bots")}
@@ -302,6 +327,26 @@ export default function NewBotPage() {
         {step === 0 && (
           <div className="bg-white rounded-lg border border-gray-100 p-6 space-y-5">
             <div>
+              {isSuperAdmin && (
+                <div className="mb-5">
+                  <label className="block text-[13px] text-gray-600 mb-1.5">
+                    Company <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={companyId}
+                    onChange={(event) => setCompanyId(event.target.value)}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+                    required
+                  >
+                    {companies.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <label className="block text-[13px] text-gray-600 mb-1.5">
                 Bot name <span className="text-red-500">*</span>
               </label>

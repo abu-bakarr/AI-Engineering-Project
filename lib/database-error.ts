@@ -1,4 +1,20 @@
 export function databaseErrorResponse(error: unknown) {
+  const status =
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number"
+      ? error.status
+      : null;
+  if (status) {
+    return {
+      status,
+      body: {
+        error: error instanceof Error ? error.message : "Request rejected.",
+      },
+    };
+  }
+
   const code =
     typeof error === "object" && error !== null && "code" in error
       ? String(error.code)

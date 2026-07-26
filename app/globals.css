@@ -1,3 +1,45 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@keyframes rise {
+  from {
+    transform: scaleY(0.2);
+    transform-origin: bottom;
+    opacity: 0.35;
+  }
+  to {
+    transform: scaleY(1);
+    transform-origin: bottom;
+    opacity: 1;
+  }
+}
+
+@keyframes soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gentle-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(8 145 178 / 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgb(8 145 178 / 0);
+  }
+}
+
+.animate-soft-enter {
+  animation: soft-enter 420ms ease-out both;
+}
+
+.animate-gentle-pulse {
+  animation: gentle-pulse 1800ms ease-in-out infinite;
+}

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileText, Loader2, MessageCircle, Trash2, X } from "lucide-react";
+import { AlertTriangle, FileText, Globe2, Headphones, Loader2, MessageCircle, Trash2, X } from "lucide-react";
 import { Bot } from "@/lib/types";
 import {
   clearPersistentPreviewBotId,
@@ -12,6 +12,7 @@ import {
 interface BotCardProps {
   bot: Bot;
   onDelete: () => void;
+  canManage?: boolean;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -21,7 +22,7 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export default function BotCard({ bot, onDelete }: BotCardProps) {
+export default function BotCard({ bot, onDelete, canManage = true }: BotCardProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -91,8 +92,19 @@ export default function BotCard({ bot, onDelete }: BotCardProps) {
         </p>
         <p className="mt-1 text-[12px] text-slate-400">
           {bot.documents.length} document{bot.documents.length !== 1 ? "s" : ""} ·{" "}
-          {bot.totalQueries.toLocaleString()} queries
+          {bot.totalQueries.toLocaleString()} queries · {bot.conversationCount ?? 0} conversations
         </p>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5">
+            <Globe2 size={12} /> Web
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5">
+            <MessageCircle size={12} /> Meta-ready
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5">
+            <Headphones size={12} /> Takeover
+          </span>
+        </div>
       </div>
         </button>
 
@@ -106,30 +118,37 @@ export default function BotCard({ bot, onDelete }: BotCardProps) {
       >
         {bot.status === "active" ? "Active" : "Draft"}
       </span>
+      <span className="shrink-0 text-[12px] text-slate-400">
+        Updated {bot.updatedAt ? new Date(bot.updatedAt).toLocaleDateString() : new Date(bot.createdAt).toLocaleDateString()}
+      </span>
 
-      <button
-        onClick={() => {
-          if (canPreview) {
-            setPersistentPreviewBotId(bot.id);
-          }
-          router.push(`/bots/${bot.id}/docs`);
-        }}
-        className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-50"
-      >
-        Docs
-      </button>
+      {canManage && (
+        <>
+          <button
+            onClick={() => {
+              if (canPreview) {
+                setPersistentPreviewBotId(bot.id);
+              }
+              router.push(`/bots/${bot.id}/docs`);
+            }}
+            className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-50"
+          >
+            Docs
+          </button>
 
-      <button
-        onClick={() => {
-          if (canPreview) {
-            setPersistentPreviewBotId(bot.id);
-          }
-          router.push(`/bots/${bot.id}/embed`);
-        }}
-        className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-50"
-      >
-        Embed
-      </button>
+          <button
+            onClick={() => {
+              if (canPreview) {
+                setPersistentPreviewBotId(bot.id);
+              }
+              router.push(`/bots/${bot.id}/embed`);
+            }}
+            className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-50"
+          >
+            Embed
+          </button>
+        </>
+      )}
 
       <button
         type="button"
@@ -143,13 +162,15 @@ export default function BotCard({ bot, onDelete }: BotCardProps) {
         Preview
       </button>
 
-      <button
-        onClick={() => setConfirmOpen(true)}
-        className="shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors duration-150 hover:bg-red-50 hover:text-red-500"
-        title="Delete bot"
-      >
-        <Trash2 size={15} />
-      </button>
+      {canManage && (
+        <button
+          onClick={() => setConfirmOpen(true)}
+          className="shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors duration-150 hover:bg-red-50 hover:text-red-500"
+          title="Delete bot"
+        >
+          <Trash2 size={15} />
+        </button>
+      )}
       </div>
       </div>
     </div>

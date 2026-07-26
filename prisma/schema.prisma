@@ -9,22 +9,30 @@ datasource db {
 
 model Bot {
   id           String        @id @db.Text
+  companyId    String        @map("company_id") @db.Text
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name         String        @db.Text
   description  String?       @db.Text
   accentColor  String        @default("#2563eb") @map("accent_color") @db.Text
   logoDataUrl  String?       @map("logo_data_url") @db.Text
   initials     String        @db.Text
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
   status       String        @default("draft") @db.Text
   totalQueries Int           @default(0) @map("total_queries")
   documents    BotDocument[]
+  conversations Conversation[]
 
+  @@index([companyId, createdAt(sort: Desc)], map: "bots_company_created_at_idx")
+  @@index([companyId, updatedAt(sort: Desc)], map: "bots_company_updated_at_idx")
   @@index([createdAt(sort: Desc)], map: "bots_created_at_idx")
   @@map("bots")
 }
 
 model BotDocument {
   id         String   @id @db.Text
+  companyId  String   @map("company_id") @db.Text
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   botId      String   @map("bot_id") @db.Text
   bot        Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
   name       String   @db.Text
@@ -37,7 +45,466 @@ model BotDocument {
   content    String?  @db.Text
   source     String?  @db.Text
 
+  @@index([companyId, uploadedAt(sort: Desc)], map: "bot_documents_company_uploaded_at_idx")
   @@index([botId], map: "bot_documents_bot_id_idx")
   @@index([hash], map: "bot_documents_hash_idx")
   @@map("bot_documents")
+}
+
+model Company {
+  id                 String        @id @db.Text
+  name               String        @db.Text
+  logoUrl            String?       @map("logo_url") @db.Text
+  website            String?       @db.Text
+  industry           String?       @db.Text
+  description        String?       @db.Text
+  supportEmail       String?       @map("support_email") @db.Text
+  phone              String?       @db.Text
+  address            String?       @db.Text
+  country            String?       @db.Text
+  timezone           String        @default("UTC") @db.Text
+  defaultLanguage    String        @default("en") @map("default_language") @db.Text
+  status             String        @default("active") @db.Text
+  subscriptionStatus String        @default("trialing") @map("subscription_status") @db.Text
+  plan               String        @default("starter") @db.Text
+  billingCycle       String?       @map("billing_cycle") @db.Text
+  whatsappEnabled    Boolean       @default(false) @map("whatsapp_enabled")
+  facebookEnabled    Boolean       @default(false) @map("facebook_enabled")
+  liveChatEnabled    Boolean       @default(false) @map("live_chat_enabled")
+  trialEndsAt        DateTime?     @map("trial_ends_at") @db.Timestamptz(6)
+  subscriptionEndsAt DateTime?     @map("subscription_ends_at") @db.Timestamptz(6)
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  users              AppUser[]
+  bots               Bot[]
+  documents          BotDocument[]
+  activities         TenantActivity[]
+  settings           CompanySetting?
+  contacts           Contact[]
+  conversations      Conversation[]
+  messages           Message[]
+  internalNotes      InternalNote[]
+  conversationEvents ConversationEvent[]
+  integrations       ChannelIntegration[]
+  subscription       Subscription?
+  usageRecords       UsageRecord[]
+  departments        Department[]
+  routingRules       RoutingRule[]
+  escalationRules    EscalationRule[]
+  slaConfigs         SLAConfig[]
+  slaEvents          SLAEvent[]
+  qualityReviews     QualityReview[]
+  approvalRequests   ApprovalRequest[]
+  securityEvents     SecurityEvent[]
+
+  @@index([status], map: "companies_status_idx")
+  @@index([plan, status], map: "companies_plan_status_idx")
+  @@map("companies")
+}
+
+model AppUser {
+  id           String    @id @db.Text
+  companyId    String?   @map("company_id") @db.Text
+  company      Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email        String    @unique @db.Text
+  name         String    @db.Text
+  role         String    @default("company_user") @db.Text
+  status       String    @default("active") @db.Text
+  passwordHash String?   @map("password_hash") @db.Text
+  invitationTokenHash String? @map("invitation_token_hash") @db.Text
+  invitationExpiresAt DateTime? @map("invitation_expires_at") @db.Timestamptz(6)
+  invitedAt           DateTime? @map("invited_at") @db.Timestamptz(6)
+  firstLoginCompletedAt DateTime? @map("first_login_completed_at") @db.Timestamptz(6)
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at") @db.Timestamptz(6)
+  passwordResetCodeHash String? @map("password_reset_code_hash") @db.Text
+  passwordResetExpiresAt DateTime? @map("password_reset_expires_at") @db.Timestamptz(6)
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  assignedConversations Conversation[] @relation("ConversationAssignedAgent")
+  sentMessages          Message[]
+  internalNotes         InternalNote[]
+  conversationEvents    ConversationEvent[]
+  qualityReviews        QualityReview[] @relation("QualityReviewer")
+  approvalRequests      ApprovalRequest[] @relation("ApprovalRequester")
+
+  @@index([companyId, role], map: "app_users_company_role_idx")
+  @@index([status], map: "app_users_status_idx")
+  @@index([invitationTokenHash], map: "app_users_invitation_token_idx")
+  @@index([passwordResetCodeHash], map: "app_users_password_reset_code_idx")
+  @@map("app_users")
+}
+
+model TenantActivity {
+  id           String   @id @db.Text
+  companyId    String?  @map("company_id") @db.Text
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actorId      String?  @map("actor_id") @db.Text
+  type         String   @db.Text
+  action       String?  @db.Text
+  message      String   @db.Text
+  resourceType String?  @map("resource_type") @db.Text
+  resourceId   String?  @map("resource_id") @db.Text
+  ipAddress    String?  @map("ip_address") @db.Text
+  userAgent    String?  @map("user_agent") @db.Text
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, createdAt(sort: Desc)], map: "tenant_activity_company_created_at_idx")
+  @@index([companyId, type, createdAt(sort: Desc)], map: "tenant_activity_company_type_created_at_idx")
+  @@index([type], map: "tenant_activity_type_idx")
+  @@map("tenant_activity")
+}
+
+model CompanySetting {
+  id                    String   @id @db.Text
+  companyId             String   @unique @map("company_id") @db.Text
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  widgetAppearance      Json?    @map("widget_appearance")
+  welcomeMessage        String?  @map("welcome_message") @db.Text
+  offlineMessage        String?  @map("offline_message") @db.Text
+  botDisplayName        String?  @map("bot_display_name") @db.Text
+  botAvatarUrl          String?  @map("bot_avatar_url") @db.Text
+  supportedLanguages    Json?    @map("supported_languages")
+  businessHours         Json?    @map("business_hours")
+  defaultDepartmentId   String?  @map("default_department_id") @db.Text
+  autoCloseRules        Json?    @map("auto_close_rules")
+  aiModel               String?  @map("ai_model") @db.Text
+  responseTone          String?  @map("response_tone") @db.Text
+  confidenceThreshold   Float?   @map("confidence_threshold")
+  escalationThreshold   Float?   @map("escalation_threshold")
+  restrictedTopics      Json?    @map("restricted_topics")
+  handoffRules          Json?    @map("handoff_rules")
+  citationRequired      Boolean  @default(true) @map("citation_required")
+  maxResponseLength     Int?     @map("max_response_length")
+  notificationSettings  Json?    @map("notification_settings")
+  securitySettings      Json?    @map("security_settings")
+  retentionSettings     Json?    @map("retention_settings")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("company_settings")
+}
+
+model Contact {
+  id                 String   @id @db.Text
+  companyId          String   @map("company_id") @db.Text
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name               String?  @db.Text
+  email              String?  @db.Text
+  phone              String?  @db.Text
+  organization       String?  @db.Text
+  tags               Json?
+  customFields       Json?    @map("custom_fields")
+  consentStatus      String   @default("unknown") @map("consent_status") @db.Text
+  consentMetadata    Json?    @map("consent_metadata")
+  lastActivityAt     DateTime? @map("last_activity_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  identities         ContactChannelIdentity[]
+  conversations      Conversation[]
+  messages           Message[]
+
+  @@index([companyId, lastActivityAt(sort: Desc)], map: "contacts_company_last_activity_idx")
+  @@index([companyId, email], map: "contacts_company_email_idx")
+  @@map("contacts")
+}
+
+model ContactChannelIdentity {
+  id          String   @id @db.Text
+  companyId   String   @map("company_id") @db.Text
+  contactId   String   @map("contact_id") @db.Text
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  channel     String   @db.Text
+  externalId  String   @map("external_id") @db.Text
+  displayName String?  @map("display_name") @db.Text
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([companyId, channel, externalId], map: "contact_identities_company_channel_external_key")
+  @@index([contactId], map: "contact_identities_contact_idx")
+  @@map("contact_channel_identities")
+}
+
+model Conversation {
+  id              String   @id @db.Text
+  companyId       String   @map("company_id") @db.Text
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  botId           String?  @map("bot_id") @db.Text
+  bot             Bot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
+  contactId       String?  @map("contact_id") @db.Text
+  contact         Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  channel         String   @default("web") @db.Text
+  status          String   @default("open") @db.Text
+  mode            String   @default("AI_ACTIVE") @db.Text
+  priority        String   @default("normal") @db.Text
+  subject         String?  @db.Text
+  assignedAgentId String?  @map("assigned_agent_id") @db.Text
+  assignedAgent   AppUser? @relation("ConversationAssignedAgent", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  tags            Json?
+  lastMessageAt   DateTime? @map("last_message_at") @db.Timestamptz(6)
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz(6)
+  closedAt        DateTime? @map("closed_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages        Message[]
+  notes           InternalNote[]
+  events          ConversationEvent[]
+  slaEvents       SLAEvent[]
+  qualityReviews  QualityReview[]
+
+  @@index([companyId, status, lastMessageAt(sort: Desc)], map: "conversations_company_status_last_message_idx")
+  @@index([companyId, channel, status], map: "conversations_company_channel_status_idx")
+  @@index([companyId, assignedAgentId], map: "conversations_company_agent_idx")
+  @@index([botId], map: "conversations_bot_idx")
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @db.Text
+  companyId      String   @map("company_id") @db.Text
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String   @map("conversation_id") @db.Text
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  contactId      String?  @map("contact_id") @db.Text
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  senderUserId   String?  @map("sender_user_id") @db.Text
+  senderUser     AppUser? @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+  senderType     String   @map("sender_type") @db.Text
+  channel        String   @db.Text
+  body           String   @db.Text
+  metadata       Json?
+  externalMessageId String? @map("external_message_id") @db.Text
+  deliveryStatus String? @map("delivery_status") @db.Text
+  readAt         DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([companyId, channel, externalMessageId], map: "messages_company_channel_external_key")
+  @@index([companyId, conversationId, createdAt], map: "messages_company_conversation_created_idx")
+  @@index([companyId, createdAt(sort: Desc)], map: "messages_company_created_idx")
+  @@map("messages")
+}
+
+model InternalNote {
+  id             String   @id @db.Text
+  companyId      String   @map("company_id") @db.Text
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String   @map("conversation_id") @db.Text
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String?  @map("author_id") @db.Text
+  author         AppUser? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  body           String   @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, conversationId, createdAt], map: "internal_notes_company_conversation_created_idx")
+  @@map("internal_notes")
+}
+
+model ConversationEvent {
+  id             String   @id @db.Text
+  companyId      String   @map("company_id") @db.Text
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String   @map("conversation_id") @db.Text
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  actorId        String?  @map("actor_id") @db.Text
+  actor          AppUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  type           String   @db.Text
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, conversationId, createdAt], map: "conversation_events_company_conversation_created_idx")
+  @@index([companyId, type, createdAt(sort: Desc)], map: "conversation_events_company_type_created_idx")
+  @@map("conversation_events")
+}
+
+model ChannelIntegration {
+  id                  String   @id @db.Text
+  companyId           String   @map("company_id") @db.Text
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  channel             String   @db.Text
+  status              String   @default("pending") @db.Text
+  displayName         String?  @map("display_name") @db.Text
+  encryptedCredential Json?    @map("encrypted_credential")
+  webhookSecretHash   String?  @map("webhook_secret_hash") @db.Text
+  externalAccountId   String?  @map("external_account_id") @db.Text
+  lastWebhookEventId  String?  @map("last_webhook_event_id") @db.Text
+  lastError           String?  @map("last_error") @db.Text
+  connectedAt         DateTime? @map("connected_at") @db.Timestamptz(6)
+  tokenExpiresAt      DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([companyId, channel], map: "channel_integrations_company_channel_key")
+  @@index([companyId, status], map: "channel_integrations_company_status_idx")
+  @@map("channel_integrations")
+}
+
+model Subscription {
+  id                 String   @id @db.Text
+  companyId          String   @unique @map("company_id") @db.Text
+  company            Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan               String   @db.Text
+  status             String   @db.Text
+  billingCycle       String?  @map("billing_cycle") @db.Text
+  provider           String?  @db.Text
+  providerCustomerId String?  @map("provider_customer_id") @db.Text
+  providerSubId      String?  @map("provider_subscription_id") @db.Text
+  currentPeriodStart DateTime? @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime? @map("current_period_end") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([plan, status], map: "subscriptions_plan_status_idx")
+  @@map("subscriptions")
+}
+
+model UsageRecord {
+  id          String   @id @db.Text
+  companyId   String   @map("company_id") @db.Text
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  metric      String   @db.Text
+  quantity    Int      @default(0)
+  periodStart DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime @map("period_end") @db.Timestamptz(6)
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, metric, periodStart], map: "usage_records_company_metric_period_idx")
+  @@map("usage_records")
+}
+
+model Department {
+  id        String   @id @db.Text
+  companyId String   @map("company_id") @db.Text
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String   @db.Text
+  status    String   @default("active") @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([companyId, name], map: "departments_company_name_key")
+  @@map("departments")
+}
+
+model RoutingRule {
+  id        String   @id @db.Text
+  companyId String   @map("company_id") @db.Text
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String   @db.Text
+  priority  Int      @default(100)
+  status    String   @default("active") @db.Text
+  conditions Json
+  actions   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId, status, priority], map: "routing_rules_company_status_priority_idx")
+  @@map("routing_rules")
+}
+
+model EscalationRule {
+  id        String   @id @db.Text
+  companyId String   @map("company_id") @db.Text
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String   @db.Text
+  priority  Int      @default(100)
+  status    String   @default("active") @db.Text
+  trigger   String   @db.Text
+  conditions Json?
+  actions   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId, status, priority], map: "escalation_rules_company_status_priority_idx")
+  @@map("escalation_rules")
+}
+
+model SLAConfig {
+  id        String   @id @db.Text
+  companyId String   @map("company_id") @db.Text
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String   @db.Text
+  status    String   @default("active") @db.Text
+  channel   String?  @db.Text
+  priority  String?  @db.Text
+  firstResponseMinutes Int @map("first_response_minutes")
+  resolutionMinutes    Int @map("resolution_minutes")
+  businessHours        Json? @map("business_hours")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId, status], map: "sla_configs_company_status_idx")
+  @@map("sla_configs")
+}
+
+model SLAEvent {
+  id             String   @id @db.Text
+  companyId      String   @map("company_id") @db.Text
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String?  @map("conversation_id") @db.Text
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  type           String   @db.Text
+  dueAt          DateTime? @map("due_at") @db.Timestamptz(6)
+  breachedAt     DateTime? @map("breached_at") @db.Timestamptz(6)
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, type, createdAt(sort: Desc)], map: "sla_events_company_type_created_idx")
+  @@map("sla_events")
+}
+
+model QualityReview {
+  id             String   @id @db.Text
+  companyId      String   @map("company_id") @db.Text
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String   @map("conversation_id") @db.Text
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  reviewerId     String?  @map("reviewer_id") @db.Text
+  reviewer       AppUser? @relation("QualityReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  score          Int?
+  status         String   @default("open") @db.Text
+  tags           Json?
+  criteria       Json?
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId, status, createdAt(sort: Desc)], map: "quality_reviews_company_status_created_idx")
+  @@map("quality_reviews")
+}
+
+model ApprovalRequest {
+  id          String   @id @db.Text
+  companyId   String   @map("company_id") @db.Text
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requesterId String?  @map("requester_id") @db.Text
+  requester   AppUser? @relation("ApprovalRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  action      String   @db.Text
+  resourceType String  @map("resource_type") @db.Text
+  resourceId   String? @map("resource_id") @db.Text
+  status      String   @default("pending") @db.Text
+  metadata    Json?
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([companyId, status, createdAt(sort: Desc)], map: "approval_requests_company_status_created_idx")
+  @@map("approval_requests")
+}
+
+model SecurityEvent {
+  id          String   @id @db.Text
+  companyId   String?  @map("company_id") @db.Text
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actorId     String?  @map("actor_id") @db.Text
+  type        String   @db.Text
+  severity    String   @default("info") @db.Text
+  ipAddress   String?  @map("ip_address") @db.Text
+  userAgent   String?  @map("user_agent") @db.Text
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([companyId, type, createdAt(sort: Desc)], map: "security_events_company_type_created_idx")
+  @@map("security_events")
 }

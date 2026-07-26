@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBotById } from "@/lib/supabase-store";
+import { getPublicBotById } from "@/lib/supabase-store";
 
 function corsHeaders(origin: string | null): HeadersInit {
   return {
@@ -15,7 +15,7 @@ export async function OPTIONS(req: NextRequest) {
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const bot = await getBotById(id);
+  const bot = await getPublicBotById(id);
   if (!bot) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: corsHeaders(req.headers.get("origin")) });
   }

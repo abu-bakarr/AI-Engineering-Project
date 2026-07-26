@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
@@ -26,9 +26,21 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      - name: Test suite
+        run: npm test
+
+      - name: Coverage report
+        run: npm run test:coverage
+
+      - name: Dependency security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
       - name: Build application
         env:
-          OPENROUTER_API_KEY: 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
-          SUPABASE_URL: postgresql://postgres:8Q94T7hdy5xaXGOa@db.fsgyzmqunepmmzrmqhjw.supabase.co:5432/postgres
-          SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZzZ3l6bXF1bmVwbW16cm1xaGp3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTY5MzgzOSwiZXhwIjoyMDk3MjY5ODM5fQ.UTZCnlIMc3B7JHm3FUdF_sdD7nZWeRbZkH_y6g0J-fA
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AUTH_SESSION_SECRET: ${{ secrets.AUTH_SESSION_SECRET }}
         run: npm run build

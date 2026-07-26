@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBotById, incrementBotQueries } from "@/lib/supabase-store";
+import { getSessionFromRequest } from "@/lib/auth";
+import {
+  canAiRespondToConversation,
+  getBotById,
+  getPublicBotById,
+  incrementBotQueries,
+} from "@/lib/supabase-store";
 import { ChatResponse } from "@/lib/types";
 
 function corsHeaders(origin: string | null): HeadersInit {
@@ -20,9 +26,10 @@ export async function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const startedAt = performance.now();
   const origin = req.headers.get("origin");
-  const { botId, message } = (await req.json()) as {
+  const { botId, message, conversationId } = (await req.json()) as {
     botId?: string;
     message?: string;
+    conversationId?: string;
   };
 
   if (!botId || !message?.trim()) {
@@ -32,7 +39,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const bot = await getBotById(botId);
+  const session = getSessionFromRequest(req);
+  const bot = session
+    ? await getBotById(botId, session)
+    : await getPublicBotById(botId);
   if (!bot) {
     return NextResponse.json(
       { error: "Bot not found" },
@@ -44,6 +54,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "This bot has no uploaded documents. Upload documents first." },
       { status: 400, headers: corsHeaders(origin) },
+    );
+  }
+
+  const canAiRespond = await canAiRespondToConversation({
+    botId,
+    conversationId,
+  });
+  if (!canAiRespond) {
+    return NextResponse.json(
+      { error: "AI responses are paused while a human agent controls this conversation." },
+      { status: 409, headers: corsHeaders(origin) },
     );
   }
 
@@ -71,7 +92,7 @@ export async function POST(req: NextRequest) {
       sources,
     });
 
-    await incrementBotQueries(botId);
+    await incrementBotQueries(botId, session ?? undefined);
 
     return NextResponse.json(
       {

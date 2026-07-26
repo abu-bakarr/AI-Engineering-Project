@@ -65,7 +65,7 @@ export default function BotEmbedPage() {
 
   if (bot === undefined) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8" aria-busy="true">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8" aria-busy="true">
         <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px] text-gray-400">
           <Link href="/bots" className="hover:text-gray-600 transition-colors duration-150">
             Bots
@@ -85,7 +85,7 @@ export default function BotEmbedPage() {
 
   if (bot === null) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8">
         <Link
           href="/bots"
           className="text-[13px] text-gray-400 hover:text-gray-600 transition-colors duration-150 mb-4 inline-block"
@@ -109,7 +109,7 @@ export default function BotEmbedPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+    <div className="w-full px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px] text-gray-400">
         <Link href="/bots" className="hover:text-gray-600 transition-colors duration-150">
           Bots

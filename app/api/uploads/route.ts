@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authErrorResponse, requirePermission } from "@/lib/auth";
 import { BotDocument } from "@/lib/types";
 import {
   appendBotDocuments,
@@ -119,6 +120,7 @@ async function processUploadedDocument(params: {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = requirePermission(req, "bots:update");
     const rag = await import("@/lib/rag");
     const { ALLOWED_EXTENSIONS, hashBuffer, indexDocumentChunks } = rag;
 
@@ -157,7 +159,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const bot = await getBotById(botId);
+    const bot = await getBotById(botId, session);
     if (!bot) {
       return NextResponse.json({ error: "Bot not found" }, { status: 404 });
     }
@@ -241,7 +243,7 @@ export async function POST(req: NextRequest) {
       );
 
       if (documents.length > 0) {
-        await appendBotDocuments(botId, documents);
+        await appendBotDocuments(botId, documents, session);
       }
 
       const stream = new ReadableStream<Uint8Array>({
@@ -273,7 +275,7 @@ export async function POST(req: NextRequest) {
                 ...completedDoc,
                 id: placeholder.id,
               };
-              await appendBotDocuments(botId, [persistedDoc]);
+              await appendBotDocuments(botId, [persistedDoc], session);
               finalDocuments.push(persistedDoc);
 
               controller.enqueue(
@@ -330,11 +332,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (documents.length > 0) {
-      await appendBotDocuments(botId, documents);
+      await appendBotDocuments(botId, documents, session);
     }
 
     return NextResponse.json({ documents, skipped });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     const details =
       error instanceof Error ? error.message : "Unknown upload error";
     console.error(`Upload failed: ${details}`);

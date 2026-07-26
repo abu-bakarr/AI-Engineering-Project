@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authErrorResponse, requirePermission } from "@/lib/auth";
 import { databaseErrorResponse } from "@/lib/database-error";
 import { BotDocument } from "@/lib/types";
 import {
@@ -36,8 +37,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const session = requirePermission(_, "bots:read");
     const { id } = await params;
-    const bot = await getBotById(id);
+    const bot = await getBotById(id, session);
     if (!bot) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const staleIds = new Set(
@@ -57,12 +59,14 @@ export async function GET(
           : document,
       );
 
-      await replaceBotDocuments(id, recoveredDocuments);
+      await replaceBotDocuments(id, recoveredDocuments, session);
       bot.documents = recoveredDocuments;
     }
 
     return NextResponse.json({ bot });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     const response = databaseErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
@@ -73,9 +77,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const session = requirePermission(req, "bots:update");
     const { id } = await params;
     const updates = await req.json();
-    const currentBot = await getBotById(id);
+    const currentBot = await getBotById(id, session);
     if (!currentBot)
       return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -101,13 +106,15 @@ export async function PATCH(
           }
         }),
       );
-      await replaceBotDocuments(id, updates.documents as BotDocument[]);
+      await replaceBotDocuments(id, updates.documents as BotDocument[], session);
     }
 
     const { documents: _documents, ...botUpdates } = updates;
-    const bot = await updateBot(id, botUpdates);
+    const bot = await updateBot(id, botUpdates, session);
     return NextResponse.json({ bot });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     const response = databaseErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
@@ -118,8 +125,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const session = requirePermission(_, "bots:delete");
     const { id } = await params;
-    const botToDelete = await getBotById(id);
+    const botToDelete = await getBotById(id, session);
     if (!botToDelete) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
@@ -135,7 +143,7 @@ export async function DELETE(
           : "Failed to fully clean bot artifacts.";
     }
 
-    await deleteBot(id);
+    await deleteBot(id, session);
 
     return NextResponse.json({
       ok: true,
@@ -143,6 +151,8 @@ export async function DELETE(
       cleanupWarning,
     });
   } catch (error) {
+    const authResponse = authErrorResponse(error);
+    if (authResponse) return authResponse;
     const response = databaseErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
