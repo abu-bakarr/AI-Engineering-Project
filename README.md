@@ -18,7 +18,8 @@ Production-oriented multi-tenant SaaS platform for AI-powered customer support a
 Repository screenshots:
 
 - [Landing page preview](docs/screenshots/landing.svg)
-- [Dashboard preview](docs/screenshots/dashboard.svg)
+- [Super Admin Dashboard preview](docs/screenshots/dashboard.svg)
+- [Company Admin Dashboard preview](docs/screenshots/dashboard.svg)
 
 Recommended live captures after deployment:
 
