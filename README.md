@@ -1,97 +1,62 @@
 # SupportAI Agent
 
-Production-oriented multi-tenant SaaS platform for AI-powered customer support agents. Companies subscribe to the service, manage company users, create document-grounded support bots, embed those bots on websites, and view tenant-scoped analytics.
+SupportAI Agent is a production-oriented, multi-tenant SaaS platform for AI-powered customer support. Teams can create document-grounded bots, embed support widgets, manage users with role-based access control, and monitor tenant-scoped activity and analytics.
 
-## Capstone Highlights
+## What This Project Delivers
 
-- AI RAG support agents with citations and document-grounded refusal behavior.
-- Multi-tenant Company architecture with server-side tenant isolation.
-- Super admin, company admin, and company user RBAC.
-- Company-scoped bot visibility, uploads, chat, and analytics.
-- Professional one-page SaaS landing page, login, dashboards, user management, and company provisioning.
-- Supabase-backed PostgreSQL schema and private document storage.
-- Docker, CI, automated tests, coverage command, and security audit workflow.
-- Detailed design document: [system design.docx](system%20design.docx).
+- Multi-tenant SaaS architecture with strict server-side tenant isolation.
+- Role-based access control for super admin, company admin, and company user roles.
+- RAG chat responses grounded in uploaded documents, including citations and refusal behavior when context is missing.
+- Public embeddable chatbot endpoint for active bots.
+- Company-scoped bot, document, user, conversation, and analytics workflows.
+- Supabase-backed PostgreSQL and storage integration with Prisma data access.
+- Dockerized runtime, automated tests, and security/performance test commands.
 
 ## Screenshots
 
 Repository screenshots:
 
-- [Landing page preview](docs/screenshots/landing.svg)
-- [Super Admin Dashboard preview](docs/screenshots/dashboard.svg)
-- [Company Admin Dashboard preview](docs/screenshots/dashboard.svg)
+- [Landing page preview](docs/screenshots/landing.png)
+- [Super Admin Dashboard preview](docs/screenshots/super-admin.png)
+- [Company Admin Dashboard preview](docs/screenshots/company-admin.png)
 
-Recommended live captures after deployment:
-
-- Landing page: `/`
-- Login page: `/login`
-- Super admin dashboard: `/dashboard` as `super@supportai.local`
-- Company dashboard: `/dashboard` as `admin@acme.local`
-- User management: `/users`
-- Bot management and document upload: `/bots`
-
-## Architecture
+## Architecture Overview
 
 ```mermaid
 flowchart LR
-  Browser[Admin browser] --> Next[Next.js App Router]
-  Widget[Embedded widget] --> ChatAPI[Public active-bot chat API]
-  Next --> Auth[Session + RBAC guard]
-  Auth --> Prisma[Prisma data access]
+  Browser[Admin Browser] --> Next[Next.js App Router]
+  Widget[Embedded Widget] --> ChatAPI[Public Chat API]
+  Next --> Auth[Session and RBAC Guard]
+  Auth --> Prisma[Prisma Data Access]
   Prisma --> Postgres[(Supabase Postgres)]
   Next --> Storage[(Supabase Storage)]
   Next --> Chroma[(ChromaDB Vector Store)]
-  Next --> LLM[OpenRouter LLM + Embeddings]
+  Next --> LLM[OpenRouter LLM and Embeddings]
   Chroma --> LLM
 ```
 
-## Multi-Tenant Data Model
+For deeper architecture detail, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-```mermaid
-erDiagram
-  COMPANY ||--o{ APP_USER : owns
-  COMPANY ||--o{ BOT : owns
-  COMPANY ||--o{ BOT_DOCUMENT : owns
-  COMPANY ||--o{ TENANT_ACTIVITY : records
-  BOT ||--o{ BOT_DOCUMENT : indexes
+## Tech Stack
 
-  COMPANY {
-    text id PK
-    text name
-    text status
-    text subscription_status
-    text plan
-    text billing_cycle
-  }
-  APP_USER {
-    text id PK
-    text company_id FK
-    text email
-    text role
-    text status
-  }
-  BOT {
-    text id PK
-    text company_id FK
-    text name
-    text status
-    int total_queries
-  }
-```
+- Frontend and backend: Next.js App Router, React, TypeScript
+- Styling: Tailwind CSS
+- Data access: Prisma
+- Database and object storage: Supabase
+- Vector store: ChromaDB
+- LLM and embeddings: OpenRouter, LangChain ecosystem
+- Testing: Node test runner with unit, integration, API, E2E, security, and performance suites
 
-## Demo Accounts
+## Getting Started
 
-Seeded database users authenticate locally with `DEMO_LOGIN_PASSWORD`:
+### Prerequisites
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Super Admin | `super@supportai.local` | `Password123!` |
-| Company Admin | `admin@acme.local` | `Password123!` |
-| Company User | `agent@acme.local` | `Password123!` |
+- Node.js 20+
+- npm
+- PostgreSQL-compatible database URL (Supabase recommended)
+- ChromaDB (local container/CLI or cloud)
 
-When `SUPABASE_ANON_KEY` is configured, `/api/auth/login` attempts Supabase password auth first, then falls back to the seeded demo password for local grading.
-
-## Installation
+### Local Setup
 
 ```bash
 npm install
@@ -100,57 +65,164 @@ npm run prisma:migrate:deploy
 npm run dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001).
+Open http://localhost:3000
 
-## Environment Configuration
-
-Required:
-
-- `DATABASE_URL` or `SUPABASE_DB_URL`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `AUTH_SESSION_SECRET`
-- `OPENROUTER_API_KEY`
-- `CHROMA_URL`
-
-See [.env.example](.env.example) for all keys.
-
-## Docker
+### Local Setup with Managed Chroma Startup (Optional)
 
 ```bash
-docker-compose up --build
+node ./scripts/dev-with-chroma.mjs
 ```
 
-The app runs on port `3001`; ChromaDB runs on port `8000`.
+This helper attempts to start Chroma locally, checks readiness, and then launches Next.js.
 
-## API Documentation
+## Environment Variables
 
-See [docs/API.md](docs/API.md).
+Minimum required for a functional environment:
 
-## Testing
+- OPENROUTER_API_KEY
+- CHROMA_URL (or Chroma Cloud settings)
+- DATABASE_URL (or SUPABASE_DB_URL)
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- AUTH_SESSION_SECRET
+
+Optional but commonly used:
+
+- SUPABASE_ANON_KEY (enables Supabase password auth path)
+- SUPABASE_STORAGE_BUCKET
+- OPENROUTER_MODEL
+- OPENROUTER_EMBEDDING_MODEL
+- OPENROUTER_DOCUMENT_MODEL
+- DEMO_LOGIN_PASSWORD
+- EMAIL_FROM, SMTP_HTTP_ENDPOINT, SMTP_HTTP_TOKEN
+
+Use [.env.example](.env.example) as the source of truth for full configuration.
+
+## Demo Accounts
+
+Local seeded users authenticate with DEMO_LOGIN_PASSWORD (default: Password123!):
+
+| Role | Email |
+| --- | --- |
+| Super Admin | super@supportai.local |
+| Company Admin | admin@acme.local |
+| Company User | agent@acme.local |
+
+Login flow behavior:
+
+- If SUPABASE_ANON_KEY is configured, login first attempts Supabase password auth.
+- If Supabase auth is unavailable for that login, the app falls back to local password verification.
+
+## Common Scripts
+
+| Command | Purpose |
+| --- | --- |
+| npm run dev | Start Next.js development server |
+| npm run dev:next | Start Next.js dev server on port 3000 |
+| npm run chroma | Start local Chroma server |
+| npm run build | Generate Prisma client and build production app |
+| npm run start | Start production server |
+| npm run db:check | Validate database connectivity |
+| npm run db:reset:supabase | Reset Supabase schema using local reset script |
+| npm run prisma:migrate | Create/apply development migrations |
+| npm run prisma:migrate:deploy | Apply existing migrations |
+| npm run prisma:studio | Open Prisma Studio |
+
+## Testing and Quality
 
 ```bash
 npm test
 npm run test:coverage
+npm run test:unit
+npm run test:integration
+npm run test:api
+npm run test:e2e
 npm run test:security
 npm run test:performance
 npx tsc --noEmit
 npm run build
 ```
 
-See [docs/TESTING.md](docs/TESTING.md).
+See [docs/TESTING.md](docs/TESTING.md) for strategy and QA checklist.
+
+## API and Health Endpoints
+
+- Main API docs: [docs/API.md](docs/API.md)
+- Health check: GET /health
+- Chat endpoints: POST /api/chat and POST /chat
+
+Protected routes require the support_ai_session cookie set by the login endpoint.
+
+## Facebook and WhatsApp Integrations
+
+The platform includes tenant-aware Meta channel integration for:
+
+- WhatsApp
+- Facebook Messenger
+
+### What Is Implemented
+
+- Integration management API with role and permission checks.
+- Company-scoped channel configuration for WhatsApp and Facebook.
+- Webhook verification flow for Meta subscription handshake.
+- HMAC signature validation for inbound webhook payloads.
+- Inbound message ingestion into tenant conversations with idempotency.
+- Plan and feature gating (Growth/Enterprise) before channel usage.
+
+### Endpoints
+
+- Configuration: GET and PATCH /api/integrations
+- WhatsApp webhook: GET and POST /api/webhooks/whatsapp
+- Facebook webhook: GET and POST /api/webhooks/facebook
+
+### Required Environment Variables
+
+WhatsApp:
+
+- WHATSAPP_APP_ID
+- WHATSAPP_APP_SECRET
+- WHATSAPP_VERIFY_TOKEN
+- WHATSAPP_ACCESS_TOKEN
+
+Facebook Messenger:
+
+- FACEBOOK_APP_ID
+- FACEBOOK_APP_SECRET
+- FACEBOOK_VERIFY_TOKEN
+- FACEBOOK_PAGE_ACCESS_TOKEN
+
+Shared:
+
+- INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
+
+### Operational Notes
+
+- Webhooks are validated using x-hub-signature-256 and channel app secrets.
+- Inbound payloads are normalized and written to the correct tenant by external account mapping.
+- Duplicate events are safely ignored using channel and external message identifiers.
+- Outbound Meta message delivery is currently limited; the strongest support today is inbound capture and conversation creation.
 
 ## Deployment
 
-Recommended deployment:
+The platform is designed for deployment on managed hosts such as Render, Railway, or Vercel (with supporting services).
 
-- Next.js app: Railway, Render, Vercel, or containerized Kubernetes.
-- Database and private object storage: Supabase.
-- Vector database: Chroma Cloud or persistent Chroma container.
-- Secrets: managed environment variables, not repository files.
+Recommended topology:
 
-See [deployed.md](deployed.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Next.js application service
+- Supabase Postgres and storage bucket
+- Chroma service (cloud or persistent container)
+- Managed secrets via environment variables
+
+Deployment-specific notes are documented in [deployed.md](deployed.md).
+
+## Repository Documentation
+
+- API contract: [docs/API.md](docs/API.md)
+- Architecture detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Enterprise SaaS notes: [docs/ENTERPRISE_SAAS.md](docs/ENTERPRISE_SAAS.md)
+- Testing strategy: [docs/TESTING.md](docs/TESTING.md)
+- Design artifact: [system design.docx](system%20design.docx)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contribution guidelines are available in [CONTRIBUTING.md](CONTRIBUTING.md).
