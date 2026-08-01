@@ -56,16 +56,53 @@ For deeper architecture detail, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - PostgreSQL-compatible database URL (Supabase recommended)
 - ChromaDB (local container/CLI or cloud)
 
-### Local Setup
+### Step-by-Step Local Setup (Production Branch)
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/abu-bakarr/AI-Engineering-Project.git
+```
+
+2. Move into the project directory:
+
+```bash
+cd AI-Engineering-Project
+```
+
+3. Switch to the production branch:
+
+```bash
+git checkout production
+```
+
+4. Install dependencies:
 
 ```bash
 npm install
+```
+
+5. Create your local environment file:
+
+```bash
 cp .env.example .env
+```
+
+6. Configure the values in `.env` (database, Supabase, Chroma, OpenRouter, and auth settings).
+
+7. Apply database migrations:
+
+```bash
 npm run prisma:migrate:deploy
+```
+
+8. Start the app:
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000
+9. Open the app at http://localhost:3000
 
 ### Local Setup with Managed Chroma Startup (Optional)
 
