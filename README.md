@@ -255,6 +255,7 @@ Deployment-specific notes are documented in [deployed.md](deployed.md).
 ## Repository Documentation
 
 - API contract: [docs/API.md](docs/API.md)
+- Trello Board (https://trello.com/invite/b/6a5e24a85478a6d3dcf2de53/ATTI46a5c6319b25082a9820f0d3178a6ad2BDE2068B/ai-powered-agent)
 - Architecture detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Enterprise SaaS notes: [docs/ENTERPRISE_SAAS.md](docs/ENTERPRISE_SAAS.md)
 - Testing strategy: [docs/TESTING.md](docs/TESTING.md)
