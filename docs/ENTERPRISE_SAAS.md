@@ -152,7 +152,7 @@ There is no `lint` script currently defined in `package.json`.
 
 ## Known Limitations
 
-- Outbound WhatsApp/Facebook sending is not fully implemented.
+- Outbound WhatsApp/Facebook sending is not fully implemented becuase of Meta Verification issues.
 - Real-time inbox updates currently use API refresh foundations; production should add one chosen realtime mechanism.
 - Secure Super Admin impersonation is intentionally not enabled.
 - Payment provider checkout and invoice flows are not connected.
