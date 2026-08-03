@@ -20,6 +20,9 @@ Repository screenshots:
 - [Super Admin Dashboard preview](docs/screenshots/super-admin.png)
 - [Company Admin Dashboard preview](docs/screenshots/company-admin.png)
 
+## Live Demo
+- [Project Link](https://customer-ai-powered-agent.onrender.com/) 
+
 ## Architecture Overview
 
 ```mermaid
@@ -73,7 +76,7 @@ cd AI-Engineering-Project
 3. Switch to the production branch:
 
 ```bash
-git checkout production
+git switch -c production origin/production
 ```
 
 4. Install dependencies:
@@ -255,7 +258,7 @@ Deployment-specific notes are documented in [deployed.md](deployed.md).
 ## Repository Documentation
 
 - API contract: [docs/API.md](docs/API.md)
-- Trello Board (https://trello.com/invite/b/6a5e24a85478a6d3dcf2de53/ATTI46a5c6319b25082a9820f0d3178a6ad2BDE2068B/ai-powered-agent)
+- [Trello Board](https://trello.com/invite/b/6a5e24a85478a6d3dcf2de53/ATTI46a5c6319b25082a9820f0d3178a6ad2BDE2068B/ai-powered-agent)
 - Architecture detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Enterprise SaaS notes: [docs/ENTERPRISE_SAAS.md](docs/ENTERPRISE_SAAS.md)
 - Testing strategy: [docs/TESTING.md](docs/TESTING.md)
