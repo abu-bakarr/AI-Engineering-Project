@@ -5,8 +5,10 @@ type EmailInput = {
   html?: string;
 };
 
+const DEFAULT_APP_URL = "https://customer-ai-powered-agent.onrender.com";
+
 function appUrl() {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  return (process.env.NEXT_PUBLIC_APP_URL?.trim() || DEFAULT_APP_URL).replace(/\/+$/, "");
 }
 
 export function absoluteUrl(path: string) {
